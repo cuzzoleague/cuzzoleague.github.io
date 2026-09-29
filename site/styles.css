@@ -102,7 +102,8 @@ img { max-width: 100%; }
 .hero-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .hero-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px; background: rgba(255, 255, 255, .09); border: 1px solid rgba(255, 255, 255, .14); font-size: 13px; font-weight: 500; }
 .hero-chip b { color: #f0c56a; font-weight: 700; }
-.hero-art { position: relative; z-index: 1; margin: 0; border-radius: 18px; overflow: hidden; min-height: 240px; background: rgba(0, 0, 0, .18); border: 1px solid rgba(255, 255, 255, .12); }
+/* Square so the banner art (speech bubble on top, title along the bottom) is never cropped. */
+.hero-art { position: relative; z-index: 1; margin: 0; border-radius: 18px; overflow: hidden; aspect-ratio: 1 / 1; width: 100%; max-width: 440px; align-self: center; justify-self: end; background: rgba(0, 0, 0, .18); border: 1px solid rgba(255, 255, 255, .12); }
 .hero-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .hero-placeholder { display: none; position: absolute; inset: 0; place-items: center; background: repeating-linear-gradient(0deg, transparent 0 34px, rgba(255, 255, 255, .06) 34px 36px); }
 .hero-art.is-empty .hero-placeholder { display: grid; }
@@ -414,7 +415,7 @@ dialog form { margin-top: 16px; text-align: right; }
   .sb-team strong { font-size: 15px; }
   .week-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .week-summary .mini-tile strong { font-size: 19px; }
-  .hero-art { min-height: 150px; }
+  .hero-art { max-width: 420px; justify-self: center; }
   .lineups { grid-template-columns: 1fr; }
   html { scroll-padding-top: 118px; }
   .report { top: 0; }
