@@ -158,8 +158,8 @@ async function loadSecondary(current) {
     const statsByWeek = new Map(await Promise.all(current.season.playedWeeks.map(async w => [w, await loadWeekly('stats', current.league.season, w).catch(() => new Map())])));
     const pointsFor = weeklyPointsLookup(current.weeks, statsByWeek, stats => pointsFromStats(stats, current.league.scoring_settings));
     return gradeMoves({transactions, weeks: current.weeks, completedWeeks: current.season.playedWeeks, rosterPositions: current.league.roster_positions, players, pointsFor});
-  })().then(moves => { if (ctx === current) { ctx.moves = moves; League.renderMoves(ctx); } })
-    .catch(error => { console.error(error); if (ctx === current) { ctx.movesError = error.message || 'Sleeper data unavailable'; League.renderMoves(ctx); } });
+  })().then(moves => { if (ctx === current) { ctx.moves = moves; League.renderMoves(ctx); League.renderAwards(ctx); } })
+    .catch(error => { console.error(error); if (ctx === current) { ctx.movesError = error.message || 'Sleeper data unavailable'; League.renderMoves(ctx); League.renderAwards(ctx); } });
 
   await Promise.allSettled([historyJob, playersJob, movesJob]);
 }

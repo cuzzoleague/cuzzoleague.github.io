@@ -28,6 +28,16 @@ export const METRIC_INFO = {
   playoffOdds: {title: 'Playoff odds', body: 'Thousands of simulations of the rest of the regular season using the real remaining schedule. Each team\'s future scores are drawn from its own scoring so far, blended with the league average so a few weeks don\'t overreact. Seeds use record, then points for.', example: 'Odds ignore injuries and trades; they only know how teams have scored.'},
   badBeats: {title: 'Heartbreaks', body: 'Losses in weeks where you still outscored at least half the league.', example: 'Second-highest score of the week, but you played the highest. Brutal.'},
   luckyWins: {title: 'Lucky wins', body: 'Wins in weeks where you scored below the league median.', example: 'A below-average week that still went in the W column.'},
+  awardTopDog: {title: 'Top Dog', body: 'Goes to the team with the most weeks as the league\'s highest scorer. Ties go to whoever is higher in the power rankings.', example: 'Two weekly high scores beats one, even if the other team has scored more in total.'},
+  awardHeater: {title: 'Heater', body: 'Goes to the team with the best recent form. Each weekly score is compared with that week\'s league average (a z-score); the newest week counts most, and each older week counts 30% less than the one after it.', example: 'A team that started slow but dropped two monster weeks in a row can take this.'},
+  awardWizard: {title: 'Waiver Wizard', body: 'Goes to the team whose trades, waiver claims, and free-agent pickups have added the most points. Each move is graded for every completed week it was in effect: the best possible lineup with the move minus the best possible lineup without it, using real scores. A team\'s graded moves are added together.', example: 'Picking up a kicker who scores 12 when the one you dropped scored 3 adds 9 points that week. Every graded move is listed under Trade & waiver grades.'},
+  awardSteady: {title: 'Steady Eddie', body: 'Goes to the most consistent team: the smallest standard deviation of weekly scores. Needs at least two weeks of games.', example: 'Scoring 120, 118, and 123 is steadier than 150, 90, and 121, even though both average about 120.'},
+  awardHorseshoe: {title: 'Horseshoe', body: 'Goes to the team with the most lucky wins: wins in weeks when it scored below the league median.', example: 'Scoring 95 when most of the league topped 110, and still winning because your opponent scored 90.'},
+  awardHeartbreak: {title: 'Heartbreak Hotel', body: 'Goes to the team with the most heartbreaks: losses in weeks when it still scored above the league median.', example: 'Putting up the second-highest score of the week and losing to the highest.'},
+  awardGauntlet: {title: 'The Gauntlet', body: 'Goes to the team with the toughest schedule so far: the most total points scored against it by its actual opponents. Ties go to whoever is higher in the power rankings.', example: 'Facing a 150-point team week after week. It\'s the schedule, not you. Probably.'},
+  awardWildRide: {title: 'Wild Ride', body: 'Goes to the least predictable team: the largest standard deviation of weekly scores. Needs at least two weeks of games.', example: 'Going 160, then 85, then 140. Nobody knows which version of this team shows up.'},
+  awardIceCold: {title: 'Ice Cold', body: 'Goes to the team with the most weeks as the league\'s lowest scorer. Ties go to whoever is higher in the power rankings.', example: 'One week at the bottom is bad luck; three is a pattern.'},
+  awardBench: {title: 'Bench Blunder', body: 'Goes to the team that has left the most points on its bench. For each completed week, the best legal lineup from the players on the roster (using their real scores) is compared with the lineup actually started, and the gaps are added up.', example: 'Starting a receiver who scored 4 while a 22-point receiver sat on the bench adds 18 points.'},
   bench: {title: 'Bench points', body: 'The gap between your best possible lineup (using actual scores) and the lineup you started, added up across completed weeks.', example: 'Leaving a 25-point receiver on the bench for a 5-point starter adds 20.'}
 };
 
@@ -114,19 +124,34 @@ export function renderAwards(ctx) {
   if (!rows.length) { holder.innerHTML = '<div class="empty">Awards are handed out after Week 1.</div>'; return; }
   const top = (score, filter = () => true) => { const pool = rows.filter(filter); return pool.length ? [...pool].sort((a, b) => score(b) - score(a) || a.powerRank - b.powerRank)[0] : null; };
   const multi = rows.filter(s => s.weekly.length > 1).length ? s => s.weekly.length > 1 : () => true;
+  const byId = id => ctx.season.teams.get(id);
+  const award = (s, detail) => s ? {s, detail: detail(s)} : {pending: 'Not awarded yet'};
+
+  // Awards that need data loaded after the first render show a placeholder until it arrives.
+  let wizard = {pending: ctx.movesError ? 'Move grades unavailable' : 'Grading moves…'};
+  if (ctx.moves) {
+    const totals = [...ctx.moves.entries()].map(([id, list]) => {
+      const graded = list.filter(m => m.rows.length);
+      return {id, total: graded.reduce((t, m) => t + m.impact, 0), count: graded.length};
+    }).filter(t => t.count && byId(t.id)).sort((a, b) => b.total - a.total || byId(a.id).powerRank - byId(b.id).powerRank);
+    wizard = totals[0]?.total > 0 ? {s: byId(totals[0].id), detail: `${signed(totals[0].total)} pts from ${plural(totals[0].count, 'graded move')}`} : {pending: 'No move has paid off yet'};
+  }
   const benchKing = ctx.bench && [...ctx.bench.entries()].sort((a, b) => b[1].total - a[1].total)[0];
+  const bench = !ctx.bench ? {pending: 'Checking lineups…'} : benchKing ? {s: byId(benchKing[0]), detail: `${fmt(benchKing[1].total)} pts left on the bench`} : {pending: 'Not awarded yet'};
+
   const awards = [
-    ['👑', 'Top Dog', top(s => s.highs), s => plural(s.highs, 'weekly high score')],
-    ['🧊', 'Ice Cold', top(s => s.lows), s => plural(s.lows, 'weekly low score')],
-    ['💔', 'Heartbreak Hotel', top(s => s.badBeats), s => plural(s.badBeats, 'above-median loss', 'above-median losses'), 'badBeats'],
-    ['🍀', 'Horseshoe', top(s => s.luckyWins), s => plural(s.luckyWins, 'below-median win'), 'luckyWins'],
-    ['📏', 'Steady Eddie', top(s => -s.sd, multi), s => `${fmt(s.sd)}-pt weekly swing`, 'consistency'],
-    ['🎢', 'Wild Ride', top(s => s.sd, multi), s => `${fmt(s.sd)}-pt weekly swing`, 'consistency'],
-    ['🔥', 'Heater', top(s => s.formZ), s => `${signed(s.formZ, 2)} z recent form`, 'recentForm'],
-    ['🧱', 'Brick Wall', top(s => s.defPoints, s => s.defStarts > 0), s => `${fmt(s.defPoints)} D/ST pts started`],
-    ...(benchKing ? [['🪑', 'Bench Blunder', ctx.season.teams.get(benchKing[0]), () => `${fmt(benchKing[1].total)} pts left on the bench`, 'bench']] : [])
+    ['👑', 'Top Dog', 'awardTopDog', award(top(s => s.highs), s => plural(s.highs, 'weekly high score'))],
+    ['🔥', 'Heater', 'awardHeater', award(top(s => s.formZ), s => `${signed(s.formZ, 2)} z recent form`)],
+    ['🧙', 'Waiver Wizard', 'awardWizard', wizard],
+    ['📏', 'Steady Eddie', 'awardSteady', award(top(s => -s.sd, multi), s => `${fmt(s.sd)}-pt weekly swing`)],
+    ['🍀', 'Horseshoe', 'awardHorseshoe', award(top(s => s.luckyWins), s => plural(s.luckyWins, 'below-median win'))],
+    ['💔', 'Heartbreak Hotel', 'awardHeartbreak', award(top(s => s.badBeats), s => plural(s.badBeats, 'above-median loss', 'above-median losses'))],
+    ['🥊', 'The Gauntlet', 'awardGauntlet', award(top(s => s.pa), s => `${fmt(s.pa)} pts against · ${fmt(s.games ? s.pa / s.games : 0)} a game`)],
+    ['🎢', 'Wild Ride', 'awardWildRide', award(top(s => s.sd, multi), s => `${fmt(s.sd)}-pt weekly swing`)],
+    ['🧊', 'Ice Cold', 'awardIceCold', award(top(s => s.lows), s => plural(s.lows, 'weekly low score'))],
+    ['🪑', 'Bench Blunder', 'awardBench', bench]
   ];
-  holder.innerHTML = awards.filter(a => a[2]).map(([icon, title, s, detail, key]) => `<article class="award"><div class="award-icon" aria-hidden="true">${icon}</div><h3>${title} ${key ? info(key, title) : ''}</h3><div class="award-team">${esc(teamOf(ctx, s.id).name)}</div><div class="award-detail">${detail(s)}</div></article>`).join('');
+  holder.innerHTML = awards.map(([icon, title, key, a]) => `<article class="award ${a.pending ? 'pending' : ''}"><div class="award-icon" aria-hidden="true">${icon}</div><h3>${title} ${info(key, title)}</h3><div class="award-team">${a.pending ? esc(a.pending) : esc(teamOf(ctx, a.s.id).name)}</div><div class="award-detail">${a.pending ? '&nbsp;' : a.detail}</div></article>`).join('');
 }
 
 // ---------------------------------------------------------------- Heatmap + schedule swap

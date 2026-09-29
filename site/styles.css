@@ -186,6 +186,7 @@ select { appearance: none; -webkit-appearance: none; background: var(--surface) 
 .award-icon { font-size: 26px; line-height: 1; }
 .award h3 { font-size: 15px; text-transform: uppercase; margin-top: 10px; display: flex; align-items: center; gap: 6px; color: var(--muted); letter-spacing: .03em; }
 .award-team { font-weight: 700; font-size: 16px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.award.pending .award-team { color: var(--muted); font-weight: 600; font-size: 14px; }
 .award-detail { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 
 /* ============ Tables ============ */
