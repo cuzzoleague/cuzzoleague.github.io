@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cuzzo League fantasy football: power rankings, weekly matchups with live win odds, and a fantasy play-by-play, straight from Sleeper.">
+  <meta name="theme-color" content="#123d2b">
+  <title>Cuzzo League</title>
+  <script>try{const t=localStorage.getItem('cuzzo-theme');if(t)document.documentElement.dataset.theme=t}catch{}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#league" data-tab-link="league" aria-label="Cuzzo League home">
+        <svg class="brand-ball" viewBox="0 0 32 32" aria-hidden="true"><ellipse cx="16" cy="16" rx="14" ry="9" transform="rotate(-35 16 16)"/><path d="M11 21l10-10M13.5 15.5l3 3M15.5 13.5l3 3M11.5 17.5l3 3"/></svg>
+        <span>Cuzzo <b>League</b></span>
+      </a>
+      <nav class="tabs" aria-label="Views">
+        <a href="#league" class="tab" data-tab-link="league">League</a>
+        <a href="#matchups" class="tab" data-tab-link="matchups">Matchups<span class="tab-live" id="tabLive" hidden>Live</span></a>
+      </nav>
+      <div class="top-tools">
+        <div class="jump-wrap">
+          <button class="icon-btn jump-toggle" id="jumpToggle" type="button" aria-expanded="false" aria-controls="jumpMenu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Sections</span>
+          </button>
+          <nav class="jump-menu" id="jumpMenu" aria-label="Jump to section" hidden></nav>
+        </div>
+        <button class="icon-btn" id="refreshBtn" type="button" aria-label="Refresh data from Sleeper" title="Refresh data from Sleeper">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+        </button>
+        <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle dark mode">
+          <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.2A8.5 8.5 0 0 1 8.8 4a8.5 8.5 0 1 0 11.2 11.2Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="shell">
+    <section class="hero" aria-labelledby="heroTitle">
+      <div class="hero-copy">
+        <p class="eyebrow" id="heroEyebrow">Loading the league…</p>
+        <h1 id="heroTitle">The Cuzzo<br>League</h1>
+        <p class="tagline">Family bragging rights, settled by the numbers. Every stat here comes straight from our Sleeper league.</p>
+        <div class="hero-chips" id="heroChips"></div>
+      </div>
+      <figure class="hero-art" id="heroArt">
+        <!-- Drop the league photo at site/assets/hero.jpg and it appears here automatically. -->
+        <img src="assets/hero.jpg" alt="The Cuzzo League" onerror="this.closest('figure').classList.add('is-empty');this.remove()">
+        <div class="hero-placeholder" aria-hidden="true"><span>C</span></div>
+      </figure>
+    </section>
+
+    <!-- ===================== LEAGUE TAB ===================== -->
+    <div class="view" data-view="league" id="view-league">
+      <section class="panel-grid" id="standings" data-section="Power rankings">
+        <section class="panel" aria-labelledby="rankTitle">
+          <div class="panel-head">
+            <div><h2 id="rankTitle">Power rankings</h2><p>Who's actually good, not just lucky. Tap a team for the full report.</p></div>
+            <span class="head-note" id="rankNote"></span>
+          </div>
+          <ol class="rank-list" id="rankList" aria-live="polite"><li class="empty">Loading teams…</li></ol>
+          <div class="formula">
+            <span class="formula-title">Power score</span>
+            <span><b>40%</b> all-play win rate <button class="info-btn" data-info="allPlay" aria-label="About all-play win rate">i</button></span>
+            <span><b>35%</b> scoring strength <button class="info-btn" data-info="scoringStrength" aria-label="About scoring strength">i</button></span>
+            <span><b>25%</b> recent form <button class="info-btn" data-info="recentForm" aria-label="About recent form">i</button></span>
+          </div>
+        </section>
+        <aside class="panel report" aria-labelledby="reportTitle">
+          <div class="panel-head"><div><h2 id="reportTitle">Team report</h2><p id="reportSub">Select a team in the power rankings to see what's behind its rank.</p></div></div>
+          <div id="teamReport"><div class="empty">Loading…</div></div>
+        </aside>
+      </section>
+
+      <section class="panel" id="awards" data-section="Awards" aria-labelledby="awardsTitle">
+        <div class="panel-head"><div><h2 id="awardsTitle">Weekly hardware</h2><p>Superlatives for the group chat, updated after every completed week.</p></div></div>
+        <div class="awards" id="awardsGrid"></div>
+      </section>
+
+      <section class="panel" id="heatmap" data-section="Scoring heatmap" aria-labelledby="heatTitle">
+        <div class="panel-head">
+          <div><h2 id="heatTitle">Scoring heatmap</h2><p>Every weekly score, colored by where it finished in the league that week.</p></div>
+          <div class="heat-legend" aria-hidden="true"><span>Last</span><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i><span>First</span></div>
+        </div>
+        <div class="scroll-x" id="heatmapTable" tabindex="0" role="region" aria-label="Weekly scoring heatmap"></div>
+      </section>
+
+      <section class="panel" id="swaps" data-section="Schedule swap" aria-labelledby="swapTitle">
+        <div class="panel-head"><div><h2 id="swapTitle">Schedule swap</h2><p>Your scores against someone else's schedule. Read across a row to see how each team would do with every other team's opponents.</p></div><span class="head-note">Row = scores · column = schedule</span></div>
+        <div class="scroll-x" id="swapTable" tabindex="0" role="region" aria-label="Schedule swap matrix"></div>
+      </section>
+
+      <section class="panel" id="profiles" data-section="Scoring ranges" aria-labelledby="profileTitle">
+        <div class="panel-head"><div><h2 id="profileTitle">Scoring ranges</h2><p>Floor, average, and ceiling for every team, against the league average.</p></div></div>
+        <div id="profileChart"></div>
+      </section>
+
+      <section class="panel" id="moves" data-section="Move grades" aria-labelledby="movesTitle">
+        <div class="panel-head"><div><h2 id="movesTitle">Trade &amp; waiver grades</h2><p>Did that move actually help? Compares each week's best possible lineup with and without it.</p></div></div>
+        <div id="movesReport"><div class="empty">Loading transactions…</div></div>
+      </section>
+
+      <section class="panel" id="movement" data-section="Power movement" aria-labelledby="moveTitle">
+        <div class="panel-head"><div><h2 id="moveTitle">Power movement</h2><p>Each team's power rank after every week. Hover or tap a team to follow its line.</p></div></div>
+        <div id="bumpChart"></div>
+      </section>
+
+      <section class="panel" id="history" data-section="All-time" aria-labelledby="historyTitle">
+        <div class="panel-head"><div><h2 id="historyTitle">All-time leaderboard</h2><p>Every linked Sleeper season of the league. Click a column to sort.</p></div></div>
+        <div id="historyBoard"><div class="empty">Loading past seasons…</div></div>
+      </section>
+    </div>
+
+    <!-- ===================== MATCHUPS TAB ===================== -->
+    <div class="view" data-view="matchups" id="view-matchups" hidden>
+      <section class="panel" id="weekBoard" data-section="This week" aria-labelledby="weekTitle">
+        <div class="panel-head week-head">
+          <div><h2 id="weekTitle">Matchups</h2><p id="weekSub">Win odds use Sleeper projections and update live as games are played.</p></div>
+          <div class="week-controls">
+            <label class="select-label" for="weekSelect">Week<select id="weekSelect"></select></label>
+            <button class="btn ghost small" id="thisWeekBtn" type="button" hidden>Back to this week</button>
+          </div>
+        </div>
+        <div class="week-summary" id="weekSummary"></div>
+        <div class="matchup-grid" id="matchupGrid" aria-live="polite"><div class="empty">Loading matchups…</div></div>
+        <p class="fine-print" id="oddsNote"></p>
+      </section>
+
+      <section class="panel" id="playbyplay" data-section="Play-by-play" aria-labelledby="pbpTitle">
+        <div class="panel-head">
+          <div><h2 id="pbpTitle">Fantasy play-by-play</h2><p>Every NFL play involving a starter in the selected matchup, with the fantasy points it produced.</p></div>
+          <span class="live-status" id="liveStatus"></span>
+        </div>
+        <div class="pbp-picker" id="pbpPicker" role="tablist" aria-label="Choose a matchup"></div>
+        <div id="pbpBody"><div class="empty">Pick a matchup above.</div></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>Data from the public Sleeper and ESPN feeds. Play-by-play points are estimates; Sleeper's totals are official.</p>
+  </footer>
+
+  <dialog id="infoDialog" aria-labelledby="infoTitle">
+    <h3 id="infoTitle">How it works</h3>
+    <p id="infoBody"></p>
+    <p class="info-example" id="infoExample"></p>
+    <form method="dialog"><button class="btn primary" type="submit">Got it</button></form>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

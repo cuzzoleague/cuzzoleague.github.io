@@ -1,0 +1,10 @@
+{
+  "name": "cuzzo-league",
+  "private": true,
+  "type": "module",
+  "description": "Stats site for the Cuzzo League on Sleeper, hosted on GitHub Pages.",
+  "scripts": {
+    "test": "node --test",
+    "serve": "python -m http.server 8080 -d site"
+  }
+}
