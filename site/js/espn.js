@@ -24,7 +24,7 @@ export function normalizeScoreboard(json) {
     const comp = event.competitions?.[0] || {}, status = comp.status || event.status || {};
     const side = homeAway => {
       const c = (comp.competitors || []).find(x => x.homeAway === homeAway) || {};
-      return {id: String(c.team?.id || ''), abbr: toSleeperTeam(c.team?.abbreviation || ''), espnAbbr: c.team?.abbreviation || '', name: c.team?.shortDisplayName || c.team?.displayName || '', score: Number(c.score || 0), logo: c.team?.logo || ''};
+      return {id: String(c.team?.id || ''), abbr: toSleeperTeam(c.team?.abbreviation || ''), espnAbbr: c.team?.abbreviation || '', name: c.team?.shortDisplayName || c.team?.displayName || '', score: Number(c.score || 0), logo: c.team?.logo || '', record: (c.records || [])[0]?.summary || ''};
     };
     const game = {
       id: String(event.id), date: event.date, state: status.type?.state || 'pre', statusName: status.type?.name || '',

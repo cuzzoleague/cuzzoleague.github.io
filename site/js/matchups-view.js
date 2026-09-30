@@ -1,6 +1,7 @@
-// Matchups tab: every matchup for a chosen week with live win odds, plus the fantasy play-by-play.
+// Matchups tab: every matchup for a chosen week with live win odds, plus a play-by-play for any league
+// matchup or NFL game.
 import {esc, fmt, pct, recordText, plural} from './util.js';
-import {loadWeekly, loadMatchups} from './sleeper.js';
+import {loadWeekly, loadMatchups, isTeamId} from './sleeper.js';
 import {loadScoreboard, loadSummary, gamesByTeam} from './espn.js';
 import {pointsFromStats, activeSlots, slotLabel} from './scoring.js';
 import {lineupOutlook, teamModelOutlook, winProbability, isTossUp} from './winprob.js';
@@ -8,10 +9,12 @@ import {trackPlayers, fantasyFeed, periodLabel} from './plays.js';
 import {pairsFor} from './analytics.js';
 import {avatar} from './league-view.js';
 import {LIVE_POLL_MS, IDLE_POLL_MS} from './config.js';
+import {POSITIONS, POSITION_NAMES, positionOf, fullName, shortName, photo, ownerIndex, ownerText, statLine, kickoffSlot} from './player-ui.js';
 
 const $ = sel => document.querySelector(sel);
 const INJURY = {Questionable: 'Q', Doubtful: 'D', Out: 'O', IR: 'IR', PUP: 'PUP', Sus: 'SUS', NA: 'NA', DNR: 'DNR', COV: 'COV'};
-const mu = {week: null, pick: null, filter: 'all', game: '', timer: null, updatedAt: null, requestId: 0,
+// pick is null until someone chooses: {kind: 'matchup', id: matchupId} or {kind: 'game', id: espnEventId}.
+const mu = {week: null, pick: null, pickWeek: null, filter: 'all', game: '', gameTab: 'overview', gameCands: null, gameLoading: false, timer: null, updatedAt: null, requestId: 0,
   scoreboards: new Map(), projections: new Map(), projTeams: new Map(), liveEntries: new Map(), models: [],
   feed: [], feedKey: '', feedGames: [], feedError: '', seen: new Set(), shownPoints: new Map(), flashUntil: new Map(), feedLoading: false};
 let getCtx = () => null, isVisible = () => false, onLive = () => {};
@@ -46,13 +49,6 @@ async function projectionsFor(week) {
 }
 
 const playerTeam = id => getCtx().players?.[id]?.team || mu.projTeams.get(id) || (/^[A-Z]{2,3}$/.test(id) ? id : null);
-const playerName = id => getCtx().players?.[id]?.name || (/^[A-Z]{2,3}$/.test(id) ? `${id} D/ST` : 'Loading…');
-const shortName = id => {
-  const p = getCtx().players?.[id];
-  if (!p) return playerName(id);
-  if (p.pos === 'DEF') return `${p.team || id} D/ST`;
-  return p.first ? `${p.first[0]}. ${p.last}` : p.name;
-};
 
 function startersOf(entry) {
   if (entry?.starters?.length) return entry.starters.map(String);
@@ -154,7 +150,7 @@ function cardHtml(m) {
   const when = m.status === 'final' ? `Margin ${fmt(Math.abs(m.actualA - m.actualB))}` : m.status === 'upcoming' ? '' : `${plural(left, 'starter')} left`;
   const oddsLabel = m.status === 'final' ? 'Result' : m.status === 'upcoming' ? 'Win odds' : 'Live win odds';
   const pa = Math.round(m.prob * 100), pb = 100 - pa;
-  return `<article class="matchup ${m.tossUp ? 'toss-up' : ''} ${mu.pick === m.matchupId ? 'selected' : ''}" data-matchup="${m.matchupId}" tabindex="0" aria-label="${esc(m.a.team.name)} versus ${esc(m.b.team.name)}. Show play-by-play.">
+  return `<article class="matchup ${m.tossUp ? 'toss-up' : ''} ${pickIs('matchup', m.matchupId) ? 'selected' : ''}" data-matchup="${m.matchupId}" tabindex="0" aria-label="${esc(m.a.team.name)} versus ${esc(m.b.team.name)}. Show play-by-play.">
     <div class="matchup-top"><div class="tags">${tags || '<span class="pill">Matchup ' + m.matchupId + '</span>'}</div><span class="when">${when}</span></div>
     ${sideHtml(m, m.a, 'a')}${sideHtml(m, m.b, 'b')}
     <div class="odds" aria-label="${oddsLabel}: ${esc(m.a.team.name)} ${pa}%, ${esc(m.b.team.name)} ${pb}%"><div class="odds-bar"><i class="a" style="width:${pa}%"></i><i class="b" style="width:${pb}%"></i></div>
@@ -216,18 +212,12 @@ export async function openWeek(week, {fresh = false} = {}) {
   mu.state = built.state;
   mu.games = built.games;
   renderWeekBoard();
-  // Sleeper reuses matchup numbers every week, so a new week always starts from its own best pick.
-  if (mu.pickWeek !== mu.week || !mu.models.some(m => m.matchupId === mu.pick)) { mu.pick = defaultPick(); mu.pickWeek = mu.week; }
+  // Nothing is preselected: a fresh load or a new week waits for the viewer to choose.
+  if (mu.pickWeek !== mu.week) { mu.pick = null; mu.pickWeek = mu.week; }
+  else if (mu.pick && !(currentModel() || currentGame())) mu.pick = null;
   renderPicker();
   await refreshFeed({fresh});
   schedule();
-}
-
-function defaultPick() {
-  const live = mu.models.find(m => m.status === 'live');
-  if (live) return live.matchupId;
-  const flips = [...mu.models].sort((x, y) => Math.abs((x.status === 'final' ? x.preProb : x.prob) - 0.5) - Math.abs((y.status === 'final' ? y.preProb : y.prob) - 0.5));
-  return flips[0]?.matchupId ?? null;
 }
 
 function renderWeekBoard() {
@@ -243,52 +233,120 @@ function renderWeekBoard() {
   $('#oddsNote').textContent = `🪙 Gold cards are coin flips: win odds between 42% and 58%${state === 'final' ? ' before kickoff' : ''}. ${hasProj ? 'Odds blend Sleeper player projections with live scores; each player\'s remaining projection shrinks as their NFL game clock runs.' : 'Sleeper projections are not out for this week yet, so odds use each team\'s season scoring.'}`;
 }
 
-// ---------------------------------------------------------------- play-by-play
-function renderPicker() {
-  $('#pbpPicker').innerHTML = mu.models.map(m => `<button type="button" role="tab" class="pick ${m.tossUp ? 'toss-up' : ''}" data-matchup="${m.matchupId}" aria-selected="${m.matchupId === mu.pick}">
-    <span>${esc(m.a.team.name)} vs ${esc(m.b.team.name)}</span><small>${m.status === 'upcoming' ? `${Math.round(m.prob * 100)}% – ${100 - Math.round(m.prob * 100)}%` : `${fmt(m.actualA)} – ${fmt(m.actualB)}`}${m.status === 'live' ? ' · live' : ''}</small></button>`).join('');
+// ---------------------------------------------------------------- play-by-play: picker
+const scoring = () => getCtx().league.scoring_settings;
+const pickIs = (kind, id) => mu.pick?.kind === kind && String(mu.pick.id) === String(id);
+const currentModel = () => mu.pick?.kind === 'matchup' ? mu.models.find(m => m.matchupId === mu.pick.id) : null;
+const currentGame = () => mu.pick?.kind === 'game' ? (mu.games || []).find(g => g.id === mu.pick.id) : null;
+
+function gameStatus(g) {
+  if (g.state === 'pre') return kickoff(g.date);
+  if (g.state === 'in') return `${g.detail} · ${g.away.score}–${g.home.score}`;
+  return `Final ${g.away.score}–${g.home.score}`;
 }
 
-const currentModel = () => mu.models.find(m => m.matchupId === mu.pick);
+// How many Cuzzo starters play for each NFL team this week, so the picker shows which games matter.
+function starterCounts() {
+  const counts = new Map();
+  for (const [pid, owner] of ownerIndex(getCtx(), mu.week)) {
+    const team = owner.starter ? playerTeam(pid) : null;
+    if (team) counts.set(team, (counts.get(team) || 0) + 1);
+  }
+  return counts;
+}
+
+function renderPicker() {
+  const matchups = mu.models.map(m => `<button type="button" class="pick ${m.tossUp ? 'toss-up' : ''}" data-pick="matchup:${m.matchupId}" aria-pressed="${pickIs('matchup', m.matchupId)}">
+    <span>${esc(m.a.team.name)} vs ${esc(m.b.team.name)}</span><small>${m.status === 'upcoming' ? `${Math.round(m.prob * 100)}% – ${100 - Math.round(m.prob * 100)}%` : `${fmt(m.actualA)} – ${fmt(m.actualB)}`}${m.status === 'live' ? ' · live' : ''}</small></button>`).join('');
+  const counts = starterCounts(), slots = [];
+  for (const g of [...(mu.games || [])].sort((a, b) => Date.parse(a.date) - Date.parse(b.date))) {
+    const label = kickoffSlot(g.date);
+    if (!slots.length || slots.at(-1).label !== label) slots.push({label, games: []});
+    slots.at(-1).games.push(g);
+  }
+  const chip = g => {
+    const cuzzo = (counts.get(g.away.abbr) || 0) + (counts.get(g.home.abbr) || 0);
+    return `<button type="button" class="pick game ${g.state === 'in' ? 'is-live' : ''}" data-pick="game:${g.id}" aria-pressed="${pickIs('game', g.id)}"><span>${esc(g.away.abbr)} @ ${esc(g.home.abbr)}</span><small>${esc(gameStatus(g))}</small>${cuzzo ? `<em>${plural(cuzzo, 'Cuzzo starter')}</em>` : ''}</button>`;
+  };
+  $('#pbpPicker').innerHTML = `<div class="pick-group"><div class="pick-label">League matchups</div><div class="pick-row">${matchups || '<span class="pick-empty">No matchups this week</span>'}</div></div>
+    <div class="pick-group"><div class="pick-label">NFL games · in kickoff order</div>${slots.length ? `<div class="game-slots">${slots.map(s => `<div class="game-slot"><span class="slot-title">${esc(s.label)}</span><div class="pick-row wrap">${s.games.map(chip).join('')}</div></div>`).join('')}</div>` : '<span class="pick-empty">The NFL schedule is unavailable right now.</span>'}</div>`;
+}
+
+function renderPrompt() {
+  $('#pbpBody').innerHTML = `<div class="report-prompt"><span aria-hidden="true">👆</span><p><b>Nothing selected yet</b>Pick one of your league's matchups or any NFL game above to follow it play by play. Tap any player to see their fantasy history.</p></div>`;
+  renderLiveStatus();
+}
 
 async function refreshFeed({fresh = false} = {}) {
+  if (!mu.pick) { mu.feedKey = ''; renderPrompt(); return; }
+  return mu.pick.kind === 'game' ? refreshGame({fresh}) : refreshMatchup({fresh});
+}
+
+// ---------------------------------------------------------------- play-by-play: shared bits
+const feedTools = (filters, extra = '') => `<div class="feed-tools"><div class="seg" role="group" aria-label="Filter plays">${filters.map(([k, l]) => `<button type="button" data-filter="${k}" aria-pressed="${mu.filter === k}">${l}</button>`).join('')}</div>${extra}</div>`;
+
+function filterPlays(items, owners) {
+  if (mu.game) items = items.filter(x => x.gameId === mu.game);
+  if (mu.filter === 'points') return items.filter(x => x.involvements.some(i => i.pts !== 0));
+  if (mu.filter === 'big') return items.filter(x => x.involvements.some(i => Math.abs(i.pts) >= 5));
+  if (mu.filter === 'cuzzo') return items.filter(x => x.involvements.some(i => owners?.has(i.playerId)));
+  return items;
+}
+
+// A player chip inside a play: photo, name, what they did, the points, and (in NFL game view) their Cuzzo owner.
+function playTag(inv, cls, owner) {
+  const players = getCtx().players, digits = Math.abs(inv.pts * 10 % 1) > 0.001 ? 2 : 1;
+  const sub = owner === undefined ? '' : `<small>${esc(ownerText(owner))}</small>`;
+  return `<button type="button" class="ptag ${cls}" data-player="${esc(inv.playerId)}">${photo(inv.playerId, players, 'xs')}<span class="ptag-who"><span>${esc(shortName(inv.playerId, players))} · ${esc(inv.label)}</span>${sub}</span><b>${inv.pts > 0 ? '+' : ''}${fmt(inv.pts, digits)}</b></button>`;
+}
+
+function playItem(x, cls, tags) {
+  const big = x.involvements.some(i => Math.abs(i.pts) >= 5), fresh = mu.seen.size && !mu.seen.has(x.id);
+  const score = x.home ? `${x.away} ${x.awayScore} – ${x.home} ${x.homeScore}` : '';
+  return `<li class="play ${cls} ${big ? 'big' : ''} ${fresh ? 'fresh' : ''}"><div class="play-top"><span>${periodLabel(x.period)} ${esc(x.clock)} · ${esc(x.away)} @ ${esc(x.home)}</span><span>${esc(score)}</span></div>
+    <p class="play-text">${esc(x.text)}</p><div class="play-tags">${tags}</div></li>`;
+}
+
+function keepFeedScroll(paint) {
+  const scroll = document.querySelector('#pbpBody .feed')?.scrollTop || 0;
+  paint();
+  const feed = document.querySelector('#pbpBody .feed');
+  if (feed) feed.scrollTop = scroll;
+  renderLiveStatus();
+}
+
+// ---------------------------------------------------------------- play-by-play: league matchup
+async function refreshMatchup({fresh = false} = {}) {
   const m = currentModel(), ctx = getCtx();
-  if (!m) { $('#pbpBody').innerHTML = '<div class="empty">No matchups this week.</div>'; return; }
-  const key = `${m.week}:${m.matchupId}`;
-  if (key !== mu.feedKey) { mu.feedKey = key; mu.feed = []; mu.feedGames = []; mu.seen = new Set(); mu.game = ''; mu.feedError = ''; }
-  renderPbp();
-  let players = ctx.players;
-  if (!players) {
-    players = await ctx.playersReady.catch(() => ({}));
-    if (key !== mu.feedKey) return;
-  }
-  const starters = [...m.a.starters, ...m.b.starters];
-  const tracked = trackPlayers(starters, players || {});
+  if (!m) { mu.pick = null; renderPrompt(); return; }
+  const key = `m:${m.week}:${m.matchupId}`;
+  if (key !== mu.feedKey) Object.assign(mu, {feedKey: key, feed: [], feedGames: [], seen: new Set(), game: '', feedError: ''});
+  renderMatchup();
+  const players = ctx.players || await ctx.playersReady.catch(() => ({}));
+  if (key !== mu.feedKey) return;
+  const tracked = trackPlayers([...m.a.starters, ...m.b.starters], players || {});
   const teams = new Set(tracked.map(t => t.team).filter(Boolean));
   const games = (mu.games || []).filter(g => (teams.has(g.home.abbr) || teams.has(g.away.abbr)) && g.state !== 'pre');
   mu.feedGames = games;
-  if (!games.length) { mu.feedLoading = false; renderPbp(); return; }
+  if (!games.length) { mu.feedLoading = false; renderMatchup(); return; }
   mu.feedLoading = !mu.feed.length;
-  if (mu.feedLoading) renderPbp();
+  if (mu.feedLoading) renderMatchup();
   const results = await Promise.allSettled(games.map(g => loadSummary(g.id, {fresh: fresh && g.state === 'in'})));
   if (key !== mu.feedKey) return;
   const items = [];
   let failed = 0;
   for (const r of results) {
     if (r.status !== 'fulfilled') { failed++; continue; }
-    items.push(...fantasyFeed(r.value, tracked, ctx.league.scoring_settings).items);
+    items.push(...fantasyFeed(r.value, tracked, scoring()).items);
   }
   items.sort((x, y) => (Date.parse(y.wallclock) || 0) - (Date.parse(x.wallclock) || 0) || y.seq - x.seq);
   const firstLoad = !mu.feed.length;
-  mu.feed = items;
-  mu.feedError = failed ? `${plural(failed, 'game feed')} could not be loaded.` : '';
-  mu.feedLoading = false;
-  mu.updatedAt = new Date();
-  renderPbp(firstLoad);
+  Object.assign(mu, {feed: items, feedError: failed ? `${plural(failed, 'game feed')} could not be loaded.` : '', feedLoading: false, updatedAt: new Date()});
+  renderMatchup(firstLoad);
 }
 
 function lineupHtml(m, side, key) {
-  const ctx = getCtx(), slots = activeSlots(ctx.league.roster_positions), proj = mu.projections.get(m.week) || new Map();
+  const ctx = getCtx(), players = ctx.players, slots = activeSlots(ctx.league.roster_positions), proj = mu.projections.get(m.week) || new Map();
   const rows = slots.map((slot, i) => {
     const id = side.starters[i];
     if (!id || id === '0') return `<div class="slot"><span class="slot-pos">${slotLabel(slot)}</span><span class="slot-name" style="color:var(--muted)">Empty</span><span class="slot-pts">0.0</span></div>`;
@@ -297,54 +355,129 @@ function lineupHtml(m, side, key) {
     if (prev != null && prev !== pts) mu.flashUntil.set(prevKey, Date.now() + 1500);
     mu.shownPoints.set(prevKey, pts);
     const changed = (mu.flashUntil.get(prevKey) || 0) > Date.now();
-    const injury = m.week >= ctx.nflWeek && !ctx.seasonOver ? INJURY[ctx.players?.[id]?.injury] : null;
-    return `<div class="slot ${changed ? 'flash' : ''}"><span class="slot-pos">${slotLabel(slot)}</span><span style="min-width:0"><span class="slot-name" title="${esc(playerName(id))}">${esc(shortName(id))}${injury ? ` <small class="inj" title="${esc(ctx.players[id].injury)}">${injury}</small>` : ''}</span><span class="slot-game ${game.cls}">${esc(game.text)}</span></span><span class="slot-pts">${fmt(pts)}<small>${proj.has(id) ? `proj ${fmt(proj.get(id))}` : ''}</small></span></div>`;
+    const injury = m.week >= ctx.nflWeek && !ctx.seasonOver ? INJURY[players?.[id]?.injury] : null;
+    return `<div class="slot ${changed ? 'flash' : ''}"><span class="slot-pos">${slotLabel(slot)}</span><button type="button" class="slot-who" data-player="${esc(id)}" title="${esc(fullName(id, players))}">${photo(id, players, 'xs')}<span><span class="slot-name">${esc(shortName(id, players))}${injury ? ` <small class="inj" title="${esc(players[id].injury)}">${injury}</small>` : ''}</span><span class="slot-game ${game.cls}">${esc(game.text)}</span></span></button><span class="slot-pts">${fmt(pts)}<small>${proj.has(id) ? `proj ${fmt(proj.get(id))}` : ''}</small></span></div>`;
   }).join('');
   return `<div class="lineup ${key}"><h4>${esc(side.team.name)}</h4>${rows}</div>`;
 }
 
-function feedHtml(m) {
+function matchupFeedHtml(m) {
   const side = new Map([...m.a.starters.map(id => [id, 'a']), ...m.b.starters.map(id => [id, 'b'])]);
-  const gameName = g => `${g.away.abbr} @ ${g.home.abbr}`;
-  let items = mu.feed;
-  if (mu.game) items = items.filter(x => x.gameId === mu.game);
-  if (mu.filter === 'points') items = items.filter(x => x.involvements.some(i => i.pts !== 0));
-  if (mu.filter === 'big') items = items.filter(x => x.involvements.some(i => Math.abs(i.pts) >= 5));
-  const gameSelect = mu.feedGames.length > 1 ? `<label class="select-label" for="pbpGame">Game<select id="pbpGame"><option value="">All games (${mu.feedGames.length})</option>${mu.feedGames.map(g => `<option value="${g.id}" ${g.id === mu.game ? 'selected' : ''}>${gameName(g)} · ${g.state === 'in' ? g.detail : 'Final'}</option>`).join('')}</select></label>` : '';
-  const tools = `<div class="feed-tools"><div class="seg" role="group" aria-label="Filter plays">${[['all', 'All plays'], ['points', 'Points only'], ['big', 'Big plays']].map(([k, l]) => `<button type="button" data-filter="${k}" aria-pressed="${mu.filter === k}">${l}</button>`).join('')}</div>${gameSelect}</div>`;
+  const gameSelect = mu.feedGames.length > 1 ? `<label class="select-label" for="pbpGame">Game<select id="pbpGame"><option value="">All games (${mu.feedGames.length})</option>${mu.feedGames.map(g => `<option value="${g.id}" ${g.id === mu.game ? 'selected' : ''}>${g.away.abbr} @ ${g.home.abbr} · ${g.state === 'in' ? g.detail : 'Final'}</option>`).join('')}</select></label>` : '';
+  const tools = feedTools([['all', 'All plays'], ['points', 'Points only'], ['big', 'Big plays']], gameSelect);
   if (mu.feedLoading) return tools + '<div class="empty">Loading plays…</div>';
   if (!mu.feedGames.length) {
     const next = (mu.games || []).filter(g => g.state === 'pre').sort((a, b) => Date.parse(a.date) - Date.parse(b.date))[0];
     return tools + `<div class="empty">${m.status === 'upcoming' || next ? `No snaps yet. Plays show up here as soon as the first game with one of these starters kicks off${next ? ` (${kickoff(next.date)})` : ''}.` : 'No play data for this week.'}</div>`;
   }
+  const items = filterPlays(mu.feed);
   if (!items.length) return tools + '<div class="empty">No plays match this filter yet.</div>';
   const html = items.slice(0, 300).map(x => {
     const sides = new Set(x.involvements.map(i => side.get(i.playerId)));
-    const cls = sides.size > 1 ? 'both' : [...sides][0] || '';
-    const big = x.involvements.some(i => Math.abs(i.pts) >= 5);
-    const fresh = mu.seen.size && !mu.seen.has(x.id);
-    const score = x.home ? `${x.away} ${x.awayScore} – ${x.home} ${x.homeScore}` : '';
-    return `<li class="play ${cls} ${big ? 'big' : ''} ${fresh ? 'fresh' : ''}"><div class="play-top"><span>${periodLabel(x.period)} ${esc(x.clock)} · ${esc(x.away)} @ ${esc(x.home)}</span><span>${esc(score)}</span></div>
-      <p class="play-text">${esc(x.text)}</p><div class="play-tags">${x.involvements.map(i => `<span class="ptag ${side.get(i.playerId) || ''}"><b>${i.pts > 0 ? '+' : ''}${fmt(i.pts, i.pts % 1 && Math.abs(i.pts * 10 % 1) > 0.001 ? 2 : 1)}</b>${esc(shortName(i.playerId))} · ${esc(i.label)}</span>`).join('')}</div></li>`;
+    return playItem(x, sides.size > 1 ? 'both' : [...sides][0] || '', x.involvements.map(i => playTag(i, side.get(i.playerId) || '')).join(''));
   }).join('');
   mu.feed.forEach(x => mu.seen.add(x.id));
   return `${tools}<ol class="feed" aria-label="Plays, newest first">${html}</ol>`;
 }
 
-function renderPbp(firstLoad = false) {
+function renderMatchup(firstLoad = false) {
   const m = currentModel();
   if (!m) return;
   if (firstLoad) mu.feed.forEach(x => mu.seen.add(x.id));
   const pa = Math.round(m.prob * 100);
   const mid = m.status === 'upcoming' ? `<div class="sb-scores"><span class="a">${fmt(m.a.pre.expected)}</span><em>proj</em><span class="b">${fmt(m.b.pre.expected)}</span></div><small>Kickoff odds ${pa}% – ${100 - pa}%</small>`
     : `<div class="sb-scores"><span class="a">${fmt(m.actualA)}</span><em>${m.status === 'final' ? 'final' : 'to'}</em><span class="b">${fmt(m.actualB)}</span></div><small>${m.status === 'final' ? `Pregame ${Math.round(m.preProb * 100)}% – ${100 - Math.round(m.preProb * 100)}%` : `Win odds ${pa}% – ${100 - pa}% · proj ${fmt(m.a.live.expected)} – ${fmt(m.b.live.expected)}`}</small>`;
-  const scroll = document.querySelector('#pbpBody .feed')?.scrollTop || 0;
-  $('#pbpBody').innerHTML = `<div class="scoreboard"><div class="sb-team a">${avatar(m.a.team, 'lg')}<div><strong>${esc(m.a.team.name)}</strong><small>${esc(m.a.team.manager || '')}</small></div></div><div class="sb-mid">${mid}</div><div class="sb-team b">${avatar(m.b.team, 'lg')}<div><strong>${esc(m.b.team.name)}</strong><small>${esc(m.b.team.manager || '')}</small></div></div></div>
-    <div class="pbp-layout"><div class="lineups">${lineupHtml(m, m.a, 'a')}${lineupHtml(m, m.b, 'b')}</div><div>${feedHtml(m)}</div></div>
-    <p class="pbp-note">Play values are estimated from ESPN's play-by-play using this league's scoring; the lineup totals come straight from Sleeper and are official. D/ST points-allowed bonuses are only settled at the end of each game.${mu.feedError ? ` ${esc(mu.feedError)}` : ''}</p>`;
-  const feed = document.querySelector('#pbpBody .feed');
-  if (feed) feed.scrollTop = scroll;
-  renderLiveStatus();
+  keepFeedScroll(() => {
+    $('#pbpBody').innerHTML = `<div class="scoreboard"><div class="sb-team a">${avatar(m.a.team, 'lg')}<div><strong>${esc(m.a.team.name)}</strong><small>${esc(m.a.team.manager || '')}</small></div></div><div class="sb-mid">${mid}</div><div class="sb-team b">${avatar(m.b.team, 'lg')}<div><strong>${esc(m.b.team.name)}</strong><small>${esc(m.b.team.manager || '')}</small></div></div></div>
+      <div class="pbp-layout"><div class="lineups">${lineupHtml(m, m.a, 'a')}${lineupHtml(m, m.b, 'b')}</div><div>${matchupFeedHtml(m)}</div></div>
+      <p class="pbp-note">Play values are estimated from ESPN's play-by-play using this league's scoring; the lineup totals come straight from Sleeper and are official. D/ST points-allowed bonuses are only settled at the end of each game. Tap a player for their fantasy history.${mu.feedError ? ` ${esc(mu.feedError)}` : ''}</p>`;
+  });
+}
+
+// ---------------------------------------------------------------- play-by-play: NFL game
+const CAP = {QB: 3, RB: 5, WR: 6, TE: 4, K: 2, DEF: 1};
+
+// Everyone worth showing for a game: players with stats, players projected for points, and both defenses.
+function gameCandidates(g, stats, players) {
+  const proj = mu.projections.get(mu.week) || new Map(), teams = [g.away.abbr, g.home.abbr], ids = new Set(teams);
+  for (const [id, row] of stats) if (teams.includes(row.team)) ids.add(id);
+  for (const [id, pts] of proj) if (pts >= 0.5 && teams.includes(mu.projTeams.get(id))) ids.add(id);
+  const active = st => st && ['pass_att', 'rush_att', 'rec_tgt', 'rec', 'fga', 'xpa'].some(k => Number(st[k]) > 0);
+  return [...ids].map(id => {
+    const row = stats.get(id);
+    return {id, pos: positionOf(id, players, row?.player?.position), team: isTeamId(id) ? id : row?.team || mu.projTeams.get(id) || players?.[id]?.team,
+      pts: row ? pointsFromStats(row.stats, scoring()) : null, proj: proj.has(id) ? proj.get(id) : null, stats: row?.stats || null};
+  }).filter(c => POSITIONS.includes(c.pos) && teams.includes(c.team) && (c.pos === 'DEF' || c.pts || active(c.stats) || (c.proj ?? 0) >= 0.5));
+}
+
+async function refreshGame({fresh = false} = {}) {
+  const ctx = getCtx(), g = currentGame();
+  if (!g) { mu.pick = null; renderPrompt(); return; }
+  const key = `g:${mu.week}:${g.id}`;
+  if (key !== mu.feedKey) Object.assign(mu, {feedKey: key, feed: [], seen: new Set(), game: '', feedError: '', gameCands: null, gameLoading: true, gameTab: g.state === 'in' ? 'plays' : 'overview'});
+  renderGame();
+  const players = ctx.players || await ctx.playersReady.catch(() => ({}));
+  if (key !== mu.feedKey) return;
+  const live = fresh && g.state === 'in';
+  const [stats, summary] = await Promise.all([
+    loadWeekly('stats', ctx.league.season, mu.week, {fresh: live}).catch(() => new Map()),
+    g.state === 'pre' ? Promise.resolve(null) : loadSummary(g.id, {fresh: live}).catch(() => null)
+  ]);
+  if (key !== mu.feedKey) return;
+  const firstLoad = !mu.feed.length;
+  mu.gameCands = gameCandidates(g, stats, players || {});
+  const tracked = trackPlayers(mu.gameCands.map(c => c.id), players || {});
+  mu.feed = summary ? fantasyFeed(summary, tracked, scoring()).items.sort((x, y) => y.seq - x.seq) : [];
+  Object.assign(mu, {feedError: g.state !== 'pre' && !summary ? "ESPN's play-by-play for this game could not be loaded." : '', gameLoading: false, updatedAt: new Date()});
+  renderGame(firstLoad);
+}
+
+function gameBoard(g) {
+  const team = (s, side) => `<div class="gb-team ${side}">${s.logo ? `<img src="${esc(s.logo)}" alt="" loading="lazy">` : ''}<div><strong>${esc(s.abbr)}</strong><small>${esc(s.record || '')}</small></div><b class="gb-score">${g.state === 'pre' ? '' : s.score}</b></div>`;
+  const status = g.state === 'in' ? `<span class="pill live">${esc(g.detail)}</span>` : g.state === 'post' ? `<span class="pill final">${esc(g.detail || 'Final')}</span>` : `<span class="pill">${esc(kickoff(g.date))}</span>`;
+  return `<div class="game-board">${team(g.away, 'away')}<div class="gb-mid">${status}</div>${team(g.home, 'home')}</div>`;
+}
+
+function overviewHtml(g, cands, owners) {
+  const players = getCtx().players, order = (a, b) => (b.pts ?? -99) - (a.pts ?? -99) || (b.proj ?? 0) - (a.proj ?? 0);
+  const cell = (c, side) => c ? `<button type="button" class="ov-cell ${side} ${owners.get(c.id) ? 'owned' : ''}" data-player="${esc(c.id)}">${photo(c.id, players, 'sm')}
+      <span class="ov-who"><span class="ov-name">${esc(shortName(c.id, players))}</span><span class="ov-owner">${esc(ownerText(owners.get(c.id)))}</span><span class="ov-line">${esc(statLine(c.stats, c.pos))}</span></span>
+      <span class="ov-pts"><b>${c.pts == null ? '–' : fmt(c.pts, 2)}</b><small>${c.proj == null ? '–' : fmt(c.proj, 2)}</small></span></button>` : '<span class="ov-cell empty"></span>';
+  const html = POSITIONS.map(pos => {
+    const away = cands.filter(c => c.pos === pos && c.team === g.away.abbr).sort(order).slice(0, CAP[pos]);
+    const home = cands.filter(c => c.pos === pos && c.team === g.home.abbr).sort(order).slice(0, CAP[pos]);
+    if (!away.length && !home.length) return '';
+    return `<section class="ov-group"><h5>${POSITION_NAMES[pos]}</h5>${Array.from({length: Math.max(away.length, home.length)}, (_, i) => `<div class="ov-row">${cell(away[i], 'away')}${cell(home[i], 'home')}</div>`).join('')}</section>`;
+  }).join('');
+  return html || '<div class="empty">No player data for this game yet.</div>';
+}
+
+function gameFeedHtml(g, owners) {
+  const tools = feedTools([['all', 'All plays'], ['points', 'Points only'], ['big', 'Big plays'], ['cuzzo', 'Cuzzo players']]);
+  if (g.state === 'pre') return tools + `<div class="empty">Kickoff is ${esc(kickoff(g.date))}. Fantasy plays stream in here live once the game starts.</div>`;
+  const items = filterPlays(mu.feed, owners);
+  if (!items.length) return tools + `<div class="empty">${mu.feed.length ? 'No plays match this filter yet.' : 'No fantasy plays yet.'}</div>`;
+  const html = items.slice(0, 400).map(x => {
+    const owned = x.involvements.some(i => owners.has(i.playerId));
+    return playItem(x, owned ? 'owned' : '', x.involvements.map(i => playTag(i, owners.has(i.playerId) ? 'owned' : '', owners.get(i.playerId) || null)).join(''));
+  }).join('');
+  mu.feed.forEach(x => mu.seen.add(x.id));
+  return `${tools}<ol class="feed" aria-label="Plays, newest first">${html}</ol>`;
+}
+
+function renderGame(firstLoad = false) {
+  const g = currentGame();
+  if (!g) return;
+  if (firstLoad) mu.feed.forEach(x => mu.seen.add(x.id));
+  const owners = ownerIndex(getCtx(), mu.week);
+  const tabs = `<div class="seg game-tabs" role="group" aria-label="Game view">${[['overview', 'Overview'], ['plays', 'Plays']].map(([k, l]) => `<button type="button" data-gtab="${k}" aria-pressed="${mu.gameTab === k}">${l}</button>`).join('')}</div>`;
+  const body = mu.gameLoading ? '<div class="empty">Loading game…</div>'
+    : mu.gameTab === 'overview' ? `<p class="ov-key"><span>${esc(g.away.abbr)}</span><span>Fantasy points · <small>projection</small></span><span>${esc(g.home.abbr)}</span></p>${overviewHtml(g, mu.gameCands || [], owners)}`
+    : gameFeedHtml(g, owners);
+  keepFeedScroll(() => {
+    $('#pbpBody').innerHTML = `${gameBoard(g)}${tabs}<div class="game-body">${body}</div>
+      <p class="pbp-note">Fantasy points use this league's scoring on Sleeper's stats; play values are estimated from ESPN's play-by-play. Under each name is the Cuzzo team that rosters the player ("bench" if they aren't starting this week). Tap any player for their fantasy history.${mu.feedError ? ` ${esc(mu.feedError)}` : ''}</p>`;
+  });
 }
 
 function renderLiveStatus() {
@@ -399,17 +532,30 @@ export function initMatchups({context, visible, onLiveChange, onWeekChange}) {
   getCtx = context; isVisible = visible; onLive = onLiveChange;
   $('#weekSelect').addEventListener('change', e => { openWeek(Number(e.target.value)); onWeekChange(Number(e.target.value)); });
   $('#thisWeekBtn').addEventListener('click', () => { openWeek(getCtx().defaultWeek); onWeekChange(getCtx().defaultWeek); });
-  const choose = id => {
-    mu.pick = id;
-    document.querySelectorAll('.matchup').forEach(el => el.classList.toggle('selected', Number(el.dataset.matchup) === id));
+  const choose = (kind, id) => {
+    mu.pick = {kind, id: kind === 'matchup' ? Number(id) : String(id)};
+    mu.filter = 'all';
+    document.querySelectorAll('.matchup').forEach(el => el.classList.toggle('selected', kind === 'matchup' && Number(el.dataset.matchup) === Number(id)));
     renderPicker();
     refreshFeed();
   };
-  $('#matchupGrid').addEventListener('click', e => { const card = e.target.closest('.matchup'); if (card) { choose(Number(card.dataset.matchup)); $('#playbyplay').scrollIntoView({behavior: 'smooth', block: 'start'}); } });
-  $('#matchupGrid').addEventListener('keydown', e => { const card = e.target.closest('.matchup'); if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); choose(Number(card.dataset.matchup)); $('#playbyplay').scrollIntoView({behavior: 'smooth', block: 'start'}); } });
-  $('#pbpPicker').addEventListener('click', e => { const b = e.target.closest('.pick'); if (b) choose(Number(b.dataset.matchup)); });
-  $('#pbpBody').addEventListener('click', e => { const b = e.target.closest('[data-filter]'); if (b) { mu.filter = b.dataset.filter; renderPbp(); } });
-  $('#pbpBody').addEventListener('change', e => { if (e.target.id === 'pbpGame') { mu.game = e.target.value; renderPbp(); $('#pbpGame')?.focus(); } });
+  const openCard = card => { choose('matchup', card.dataset.matchup); $('#playbyplay').scrollIntoView({behavior: 'smooth', block: 'start'}); };
+  $('#matchupGrid').addEventListener('click', e => { const card = e.target.closest('.matchup'); if (card) openCard(card); });
+  $('#matchupGrid').addEventListener('keydown', e => { const card = e.target.closest('.matchup'); if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openCard(card); } });
+  $('#pbpPicker').addEventListener('click', e => {
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    const [kind, id] = b.dataset.pick.split(':');
+    choose(kind, id);
+  });
+  const rerender = () => (currentGame() ? renderGame() : renderMatchup());
+  $('#pbpBody').addEventListener('click', e => {
+    const filter = e.target.closest('[data-filter]');
+    if (filter) { mu.filter = filter.dataset.filter; rerender(); return; }
+    const tab = e.target.closest('[data-gtab]');
+    if (tab) { mu.gameTab = tab.dataset.gtab; renderGame(); }
+  });
+  $('#pbpBody').addEventListener('change', e => { if (e.target.id === 'pbpGame') { mu.game = e.target.value; rerender(); $('#pbpGame')?.focus(); } });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && getCtx()) tick(); else clearTimeout(mu.timer); });
 }
 

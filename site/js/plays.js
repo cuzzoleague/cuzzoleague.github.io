@@ -7,21 +7,44 @@ const escapeRe = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const SUFFIX = /\s+(Jr\.?|Sr\.?|II|III|IV|V)$/i;
 
 // ESPN abbreviates players as "B.Robinson", adding letters when teammates collide ("Bi.Robinson").
-export function namePattern(player) {
-  const first = String(player?.first || '').trim(), last = String(player?.last || '').replace(SUFFIX, '').trim();
+const firstLetters = player => { const first = String(player?.first || '').trim(); return first.replace(/[^A-Za-z]/g, '') || first; };
+const lastName = player => String(player?.last || '').replace(SUFFIX, '').trim();
+
+// minPrefix > 1 when a teammate shares the last name and first initial (ESPN then prints "Ja.Williams").
+export function namePattern(player, minPrefix = 1) {
+  const first = String(player?.first || '').trim(), last = lastName(player);
   if (!first || !last) return null;
-  const letters = first.replace(/[^A-Za-z]/g, '') || first;
-  const prefixes = [...new Set([1, 2, 3].map(k => letters.slice(0, k)).filter(Boolean))].sort((a, b) => b.length - a.length).map(escapeRe);
+  const letters = firstLetters(player);
+  const prefixes = [...new Set([1, 2, 3].filter(k => k >= minPrefix).map(k => letters.slice(0, k)).filter(Boolean))].sort((a, b) => b.length - a.length).map(escapeRe);
   const lastPart = escapeRe(last).replace(/(\\\.)?\s+/g, (_, dot) => `${dot || ''}\\s?`);
   return `(?<![A-Za-z.'-])(?:${prefixes.join('|')})\\.\\s?${lastPart}(?![A-Za-z'])`;
 }
 
 export function trackPlayers(starterIds, players) {
-  return starterIds.filter(id => id && id !== '0').map(id => {
+  const tracked = [...new Set(starterIds)].filter(id => id && id !== '0').map(id => {
     const p = players?.[id] || {}, isDef = p.pos === 'DEF' || /^[A-Z]{2,3}$/.test(id);
     const source = isDef ? null : namePattern(p);
     return {id, team: isDef ? (p.team || id) : p.team, pos: isDef ? 'DEF' : p.pos, isDef, pattern: source};
   });
+  // When whole rosters are tracked, teammates can share a last name. Require enough first-name letters
+  // to tell them apart, the same way ESPN's play text does.
+  const groups = new Map();
+  for (const t of tracked) {
+    if (t.isDef || !t.pattern) continue;
+    const key = `${t.team}|${lastName(players[t.id]).toLowerCase()}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    for (const t of group) {
+      const mine = firstLetters(players[t.id]);
+      let k = 1;
+      while (k < 3 && group.some(o => o !== t && firstLetters(players[o.id]).slice(0, k) === mine.slice(0, k))) k++;
+      t.pattern = namePattern(players[t.id], k);
+    }
+  }
+  return tracked;
 }
 
 // ---- text helpers -------------------------------------------------------------------------------

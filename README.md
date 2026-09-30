@@ -16,7 +16,10 @@ with no backend: the browser pulls everything live from the public Sleeper and E
 **Matchups tab**
 - Opens on the current week, which rolls over to the next week every Tuesday at 8:00 AM Pacific (set in `site/js/weeks.js`). A dropdown picks any past, current, future, or playoff week.
 - Every matchup shows records, projected or final scores, and win odds. Games with odds between 42% and 58% are highlighted in gold as coin flips. Finished weeks show the pregame odds and flag upsets.
-- **Fantasy play-by-play**: pick a matchup and you get both lineups with live NFL game status, plus a feed of every NFL play involving those starters and the fantasy points each play produced. While games are live it refreshes every 30 seconds.
+- **Fantasy play-by-play**: nothing is preselected; pick one of the league's matchups or any NFL game (listed in kickoff order: Thursday, Sunday morning, afternoon, and night, then Monday). While games are live it refreshes every 30 seconds.
+  - A **league matchup** shows both lineups with live NFL game status and a feed of every play involving those starters, with the fantasy points each play produced.
+  - An **NFL game** shows an Overview (every fantasy-relevant player with points, projection, stat line, and which Cuzzo team rosters them) and a Plays feed with the points every play produced.
+- **Player cards**: tap any player to see their bio, who rosters them, and a week-by-week fantasy game log for this season and the two before it.
 
 ## Adding the league photo
 

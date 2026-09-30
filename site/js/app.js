@@ -9,6 +9,7 @@ import {esc, clamp, recordText} from './util.js';
 import {fantasyWeekAt, nextRollover} from './weeks.js';
 import * as League from './league-view.js';
 import * as Matchups from './matchups-view.js';
+import {initPlayerModal} from './player-modal.js';
 
 const $ = sel => document.querySelector(sel);
 const SIMS = 4000, STALE_MS = 15 * 60_000;
@@ -229,6 +230,7 @@ League.bindRankings(() => ctx);
 League.bindMoves(() => ctx);
 League.bindBump();
 League.bindHistory(() => ctx);
+initPlayerModal(() => ctx);
 Matchups.initMatchups({
   context: () => ctx,
   visible: () => tab === 'matchups' && !document.hidden,

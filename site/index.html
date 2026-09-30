@@ -12,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
   <link rel="stylesheet" href="styles.css">
+  <!-- asset-map -->
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -136,10 +137,10 @@
 
       <section class="panel" id="playbyplay" data-section="Play-by-play" aria-labelledby="pbpTitle">
         <div class="panel-head">
-          <div><h2 id="pbpTitle">Fantasy play-by-play</h2><p>Every NFL play involving a starter in the selected matchup, with the fantasy points it produced.</p></div>
+          <div><h2 id="pbpTitle">Fantasy play-by-play</h2><p>Follow one of your league's matchups or any NFL game, play by play, with the fantasy points every play produced.</p></div>
           <span class="live-status" id="liveStatus"></span>
         </div>
-        <div class="pbp-picker" id="pbpPicker" role="tablist" aria-label="Choose a matchup"></div>
+        <div class="pbp-picker" id="pbpPicker" aria-label="Choose a league matchup or NFL game"></div>
         <div id="pbpBody"><div class="empty">Pick a matchup above.</div></div>
       </section>
     </div>
@@ -149,6 +150,7 @@
     <p>Data from the public Sleeper and ESPN feeds. Play-by-play points are estimates; Sleeper's totals are official.</p>
   </footer>
 
+  <dialog id="playerDialog" class="player-dialog" aria-labelledby="playerTitle"><div id="playerBody"></div></dialog>
   <dialog id="infoDialog" aria-labelledby="infoTitle">
     <h3 id="infoTitle">How it works</h3>
     <p id="infoBody"></p>

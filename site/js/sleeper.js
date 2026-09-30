@@ -2,7 +2,7 @@
 
 const API = 'https://api.sleeper.app';
 const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
-const PLAYER_CACHE = 'cuzzo-players-v1', PLAYER_KEY = 'https://cuzzo.local/players.json', PLAYER_TTL = 24 * 60 * 60 * 1000;
+const PLAYER_CACHE = 'cuzzo-players-v2', PLAYER_KEY = 'https://cuzzo.local/players.json', PLAYER_TTL = 24 * 60 * 60 * 1000;
 
 async function getJson(url, {fresh = false} = {}) {
   const response = await fetch(url, fresh ? {cache: 'no-store'} : undefined);
@@ -62,7 +62,8 @@ function trimPlayers(raw) {
     out[id] = {
       first: p.first_name || '', last: p.last_name || '',
       name: position === 'DEF' ? `${p.first_name || id} ${p.last_name || ''}`.trim() : (p.full_name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || id),
-      pos: position, fpos: p.fantasy_positions || [position], team: p.team || null, injury: p.injury_status || null, espn: p.espn_id || null
+      pos: position, fpos: p.fantasy_positions || [position], team: p.team || null, injury: p.injury_status || null, espn: p.espn_id || null,
+      age: p.age || null, ht: p.height || null, wt: p.weight || null, exp: p.years_exp ?? null, college: p.college || null, num: p.number ?? null
     };
   }
   return out;
@@ -86,6 +87,31 @@ export async function loadPlayers() {
     throw error;
   }
 }
+
+// One player's stat lines and projections for a season, keyed by week (null = no game).
+const logCache = new Map();
+export function loadPlayerLog(id, season) {
+  const key = `${id}:${season}`;
+  if (!logCache.has(key)) {
+    const query = `season_type=regular&season=${season}&grouping=week`;
+    logCache.set(key, Promise.all([
+      getJson(`${API}/stats/nfl/player/${id}?${query}`).catch(() => ({})),
+      getJson(`${API}/projections/nfl/player/${id}?${query}`).catch(() => ({}))
+    ]).then(([stats, proj]) => ({stats: stats || {}, proj: proj || {}})));
+  }
+  return logCache.get(key);
+}
+
+const scheduleCache = new Map();
+export function loadSchedule(season) {
+  if (!scheduleCache.has(season)) scheduleCache.set(season, getJson(`${API}/schedule/nfl/regular/${season}`).catch(() => []));
+  return scheduleCache.get(season);
+}
+
+export const isTeamId = id => /^[A-Z]{2,3}$/.test(String(id));
+export const playerPhotoUrl = id => isTeamId(id)
+  ? `https://sleepercdn.com/images/team_logos/nfl/${String(id).toLowerCase()}.png`
+  : `https://sleepercdn.com/content/nfl/players/thumb/${id}.jpg`;
 
 export const avatarUrl = (user, size = 'thumbs') => {
   const custom = user?.metadata?.avatar;

@@ -214,6 +214,7 @@ function moveTitle(ctx, m) {
   if (m.sent.length) return `Dropped ${names(m.sent)}`;
   return m.picks.length ? 'Draft picks swapped' : 'FAAB exchanged';
 }
+const playerLink = (ctx, id) => `<button type="button" class="linkish" data-player="${esc(id)}">${esc(playerName(ctx, id))}</button>`;
 const moveKind = m => m.type === 'trade' ? 'Trade' : m.type === 'waiver' ? 'Waiver claim' : 'Free agent';
 
 export function renderMoves(ctx) {
@@ -244,7 +245,7 @@ export function renderMoves(ctx) {
   holder.innerHTML = layout(`
     <article class="move-card">
       <div class="move-head"><div><div class="move-kicker">${moveKind(m)} · Week ${m.week}${partner}${extras ? ` · ${extras}` : ''}</div><h3>${esc(moveTitle(ctx, m))}</h3>
-        <div class="move-swap">${m.received.length ? `<span class="in"><b>In</b>${esc(m.received.map(id => playerName(ctx, id)).join(', '))}</span>` : ''}${m.sent.length ? `<span class="out"><b>Out</b>${esc(m.sent.map(id => playerName(ctx, id)).join(', '))}</span>` : ''}</div></div>
+        <div class="move-swap">${m.received.length ? `<span class="in"><b>In</b>${m.received.map(id => playerLink(ctx, id)).join(', ')}</span>` : ''}${m.sent.length ? `<span class="out"><b>Out</b>${m.sent.map(id => playerLink(ctx, id)).join(', ')}</span>` : ''}</div></div>
         <div class="verdict"><strong class="${m.impact > 0 ? 'good' : m.impact < 0 ? 'bad' : ''}">${m.rows.length ? `${signed(m.impact)}` : m.unrated ? 'N/A' : 'TBD'}</strong><span>${m.rows.length ? `pts over ${plural(m.rows.length, 'week')}` : m.unrated ? 'Only picks or FAAB moved' : 'No completed weeks yet'}</span></div></div>
       ${m.rows.length ? `<div class="move-tiles"><div class="mini-tile"><small>Wins it changed</small><strong class="${m.swing > 0 ? 'good' : m.swing < 0 ? 'bad' : ''}">${signed(m.swing, m.swing % 1 ? 1 : 0)}</strong><span>same opponents, same week</span></div><div class="mini-tile"><small>Started points</small><strong>${fmt(m.startedIn)}</strong><span>from players brought in</span></div><div class="mini-tile"><small>Departed players scored</small><strong>${fmt(m.rows.reduce((t, r) => t + r.sentScored, 0))}</strong><span>wherever they ended up</span></div></div>
       <div class="scroll-x"><table class="move-weeks"><thead><tr><th>Week</th><th>Best with</th><th>Best without</th><th>Impact</th><th>Actual</th><th>Result w/o → with</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
