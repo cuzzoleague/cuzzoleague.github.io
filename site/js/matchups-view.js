@@ -255,9 +255,25 @@ function starterCounts() {
   return counts;
 }
 
+// Chip numbers always read in matchup order (first team, then second). Scores are gray until someone
+// scores; once games finish, green/red mark the actual winner/loser; before that, the projected ones.
+export function chipNumbers(m) {
+  const inProgress = m.status === 'live' || m.status === 'partial';
+  const projA = inProgress ? m.a.live.expected : m.a.pre.expected, projB = inProgress ? m.b.live.expected : m.b.pre.expected;
+  let toneA = 'z', toneB = 'z';
+  if (m.actualA || m.actualB) {
+    const aAhead = m.status === 'final' ? Math.sign(m.actualA - m.actualB) : (m.prob >= 0.5 ? 1 : -1);
+    if (aAhead) [toneA, toneB] = aAhead > 0 ? ['g', 'r'] : ['r', 'g'];
+  }
+  return {projA, projB, toneA, toneB};
+}
+
 function renderPicker() {
-  const matchups = mu.models.map(m => `<button type="button" class="pick ${m.tossUp ? 'toss-up' : ''}" data-pick="matchup:${m.matchupId}" aria-pressed="${pickIs('matchup', m.matchupId)}">
-    <span>${esc(m.a.team.name)} vs ${esc(m.b.team.name)}</span><small>${m.status === 'upcoming' ? `${Math.round(m.prob * 100)}% – ${100 - Math.round(m.prob * 100)}%` : `${fmt(m.actualA)} – ${fmt(m.actualB)}`}${m.status === 'live' ? ' · live' : ''}</small></button>`).join('');
+  const matchups = mu.models.map(m => {
+    const n = chipNumbers(m);
+    return `<button type="button" class="pick league ${m.tossUp ? 'toss-up' : ''} ${m.status === 'live' ? 'is-live' : ''}" data-pick="matchup:${m.matchupId}" aria-pressed="${pickIs('matchup', m.matchupId)}">
+    <span>${esc(m.a.team.name)} vs ${esc(m.b.team.name)}</span><small class="chip-line"><b class="chip-proj"><em>proj</em>${fmt(n.projA)} – ${fmt(n.projB)}</b><b class="chip-score"><i class="sc-${n.toneA}">${fmt(m.actualA)}</i> – <i class="sc-${n.toneB}">${fmt(m.actualB)}</i></b></small></button>`;
+  }).join('');
   const counts = starterCounts(), slots = [];
   for (const g of [...(mu.games || [])].sort((a, b) => Date.parse(a.date) - Date.parse(b.date))) {
     const label = kickoffSlot(g.date);

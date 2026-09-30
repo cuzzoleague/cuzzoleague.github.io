@@ -372,6 +372,13 @@ select { appearance: none; -webkit-appearance: none; background: var(--surface) 
 .pick-empty { font-size: 13px; color: var(--muted); }
 .pick[aria-pressed="true"] { border-color: var(--ink); background: var(--surface); box-shadow: inset 0 0 0 1px var(--ink); }
 .pick.game { min-width: 118px; }
+.pick.league { min-width: 220px; }
+.pick.league.is-live > span::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--live); margin-right: 6px; vertical-align: 1px; animation: pulse 1.4s infinite; }
+.chip-line { display: flex; justify-content: space-between; gap: 14px; margin-top: 2px; }
+.chip-line b { font-weight: 600; white-space: nowrap; }
+.chip-proj em { font-style: normal; font-weight: 500; color: var(--muted); opacity: .8; margin-right: 4px; }
+.chip-score i { font-style: normal; font-weight: 700; }
+.sc-g { color: var(--good); } .sc-r { color: var(--bad); } .sc-z { color: var(--muted); }
 .pick.game em { display: block; font-style: normal; font-size: 11px; font-weight: 700; color: var(--brand); margin-top: 2px; }
 .pick.game.is-live small { color: var(--live); font-weight: 700; }
 .game-slots { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
