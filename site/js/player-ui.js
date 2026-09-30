@@ -24,11 +24,12 @@ export function shortName(id, players) {
   return p.first ? `${p.first[0]}. ${p.last}` : p.name;
 }
 
-// Headshot (or team logo for a D/ST) layered over initials, which show if the image is missing.
+// Headshot (or team logo for a D/ST). Initials only appear if the image fails; many headshots are
+// transparent cut-outs, so a visible fallback behind them would show through.
 export function photo(id, players, size = '') {
   const p = players?.[id];
   const label = isTeamId(id) ? id : String(p?.name || '?').split(/\s+/).map(w => w[0] || '').slice(0, 2).join('').toUpperCase();
-  return `<span class="pphoto ${size} ${isTeamId(id) ? 'team' : ''}" aria-hidden="true"><i>${esc(label)}</i><img src="${playerPhotoUrl(id)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
+  return `<span class="pphoto ${size} ${isTeamId(id) ? 'team' : ''}" aria-hidden="true"><i>${esc(label)}</i><img src="${playerPhotoUrl(id)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.classList.add('no-img');this.remove()"></span>`;
 }
 
 // Who rosters each player, from that week's Sleeper matchup entries (falls back to current rosters).
