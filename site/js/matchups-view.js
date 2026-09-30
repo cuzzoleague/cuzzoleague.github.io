@@ -189,7 +189,7 @@ function summaryHtml(models, state) {
 
 function weekLabel(week) {
   const ctx = getCtx(), start = Number(ctx.league.settings?.playoff_week_start || 99);
-  const tag = week < ctx.defaultWeek ? 'Final' : week === ctx.defaultWeek ? 'Current' : week === ctx.nflWeek ? 'Up next' : 'Upcoming';
+  const tag = week < ctx.defaultWeek ? 'Final' : week === ctx.defaultWeek ? 'Current' : week === ctx.defaultWeek + 1 ? 'Up next' : 'Upcoming';
   return `Week ${week} · ${ctx.seasonOver ? 'Final' : tag}${week >= start ? ' · Playoffs' : ''}`;
 }
 

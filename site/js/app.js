@@ -6,12 +6,13 @@ import {gradeMoves, weeklyPointsLookup} from './moves.js';
 import {loadHistory, readHistoryCache, writeHistoryCache, buildSeason, champions} from './history.js';
 import {pointsFromStats, optimalLineup, positionsOf} from './scoring.js';
 import {esc, clamp, recordText} from './util.js';
+import {fantasyWeekAt, nextRollover} from './weeks.js';
 import * as League from './league-view.js';
 import * as Matchups from './matchups-view.js';
 
 const $ = sel => document.querySelector(sel);
 const SIMS = 4000, STALE_MS = 15 * 60_000;
-let ctx = null, tab = 'league', loadedAt = 0, loading = null;
+let ctx = null, tab = 'league', loadedAt = 0, loading = null, rolloverTimer = null;
 
 // ---------------------------------------------------------------- chrome: theme, toast, info, menu
 function currentTheme() {
@@ -177,8 +178,11 @@ async function load({quiet = false} = {}) {
       const sameSeason = String(state.season) === String(league.season);
       const seasonOver = league.status === 'complete' || Number(state.season) > Number(league.season);
       const preseason = !seasonOver && (['pre_draft', 'drafting'].includes(league.status) || (sameSeason && state.season_type === 'pre'));
-      const nflWeek = seasonOver ? lastWeek : preseason ? 1 : clamp(Number(state.week || 1), 1, lastWeek);
-      const defaultWeek = seasonOver ? lastWeek : preseason ? 1 : clamp(Number(state.display_week || state.week || 1), 1, lastWeek);
+      // The site's "current" week turns over every Tuesday at 8 AM Pacific (see weeks.js), rather than
+      // waiting for Sleeper's app, which holds the old week until waivers run. Sleeper's own week is the fallback.
+      const rollWeek = sameSeason && state.season_start_date ? fantasyWeekAt(state.season_start_date) : null;
+      const nflWeek = seasonOver ? lastWeek : preseason ? 1 : clamp(Math.max(Number(state.week || 1), rollWeek || 0), 1, lastWeek);
+      const defaultWeek = seasonOver ? lastWeek : preseason ? 1 : clamp(rollWeek ?? Number(state.display_week || state.week || 1), 1, lastWeek);
       const weeks = await loadAllMatchups(LEAGUE_ID, lastWeek);
       const completed = [], remaining = [];
       for (let w = 1; w <= regularWeeks; w++) (seasonOver || (!preseason && w < nflWeek) ? completed : remaining).push(w);
@@ -194,7 +198,12 @@ async function load({quiet = false} = {}) {
       renderHero();
       renderLeague();
       loadSecondary(current);
-      if (tab === 'matchups') await Matchups.openWeek(parseHash().week || Matchups.selectedWeek() || defaultWeek, {fresh: Boolean(previous)});
+      // Anyone parked on the old current week moves along with the rollover; a week they picked stays put.
+      const picked = parseHash().week || (previous && Matchups.selectedWeek() !== previous.defaultWeek ? Matchups.selectedWeek() : null);
+      if (tab === 'matchups') await Matchups.openWeek(picked || defaultWeek, {fresh: Boolean(previous)});
+      clearTimeout(rolloverTimer);
+      const rollAt = !seasonOver && sameSeason && state.season_start_date ? nextRollover(state.season_start_date) : null;
+      if (rollAt && rollAt - Date.now() < 2 ** 31 - 1) rolloverTimer = setTimeout(() => load({quiet: true}), rollAt - Date.now() + 5000);
       Matchups.primeLive();
       if (!quiet) toast('League synced from Sleeper');
     } catch (error) {

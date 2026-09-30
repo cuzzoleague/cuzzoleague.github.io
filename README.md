@@ -14,7 +14,7 @@ with no backend: the browser pulls everything live from the public Sleeper and E
 - **All-time leaderboard**: every linked Sleeper season, with champions, records, points per game, and a sortable legacy score.
 
 **Matchups tab**
-- Opens on the current week and follows Sleeper's week as the season goes. A dropdown picks any past, current, future, or playoff week.
+- Opens on the current week, which rolls over to the next week every Tuesday at 8:00 AM Pacific (set in `site/js/weeks.js`). A dropdown picks any past, current, future, or playoff week.
 - Every matchup shows records, projected or final scores, and win odds. Games with odds between 42% and 58% are highlighted in gold as coin flips. Finished weeks show the pregame odds and flag upsets.
 - **Fantasy play-by-play**: pick a matchup and you get both lineups with live NFL game status, plus a feed of every NFL play involving those starters and the fantasy points each play produced. While games are live it refreshes every 30 seconds.
 
