@@ -62,8 +62,12 @@ function mainPart(text) {
   if (twoPt >= 0) main = main.slice(0, twoPt);
   const eligible = main.lastIndexOf('reported in as eligible.');
   if (eligible >= 0) main = main.slice(eligible + 'reported in as eligible.'.length);
-  main = main.trim().replace(/^Direct snap to \S+\s*/, '').replace(/^(\([^)]*\)\s*)+/, '').trim();
-  return main;
+  const formation = /^(\([^)]*\)\s*)+/;
+  main = main.trim().replace(formation, '').replace(/^Direct snap to \S+\s*/, '').replace(formation, '').trim();
+  // A fumbled snap the offense recovers can carry on as a pass ("... and recovers at NE 43. D.Maye pass short
+  // left to ..."). The pass is what counts; the yardage around the fumble isn't a run.
+  const resumed = /(?:and recovers|recovered by [A-Z]{2,3}-\S+) at (?:[A-Z]{2,3} )?\d+\.\s+(\S+\s+pass\b.*)$/.exec(main);
+  return resumed ? resumed[1] : main;
 }
 
 function yardsAfter(text, from = 0) {
@@ -145,7 +149,8 @@ export function attributePlay({text: rawText, type = '', possession, scoringTeam
 
     const isPasser = new RegExp(`^${N}\\s+pass\\b`).test(main);
     const isSacked = new RegExp(`^${N}\\s+sacked\\b`).test(main);
-    const rec = new RegExp(`\\bpass\\b[^,]*?\\b(?:to|intended for)\\s+${N}`).exec(main);
+    // The receiver is named right after the pass direction, never later in the play (e.g. "Lateral to ...").
+    const rec = new RegExp(`\\bpass(?:\\s+(?:incomplete|short|deep|left|right|middle))*\\s+(?:to|intended for)\\s+${N}`).exec(main);
     const lateralTo = complete && new RegExp(`\\bLateral to\\s+${N}`).test(main);
 
     if (isPasser) {
@@ -170,7 +175,7 @@ export function attributePlay({text: rawText, type = '', possession, scoringTeam
       add('rec', `${touchdown && !lost ? 'TD on lateral' : 'Lateral'} ${lateralYards} yds`, pts);
     }
     // Rushing: the play text starts with the ball carrier
-    if (!isPasser && !isSacked && !rec && !lateralTo && new RegExp(`^${N}\\s+(?!pass\\b|sacked\\b|kicks\\b|punts\\b|spiked\\b|\\d+ yard field goal|extra point|FUMBLES \\(Aborted\\))`).test(main)) {
+    if (!isPasser && !isSacked && !rec && !lateralTo && new RegExp(`^${N}\\s+(?!pass\\b|sacked\\b|kicks\\b|punts\\b|spiked\\b|\\d+ yard field goal|extra point|FUMBLES \\(Aborted\\)|Aborted\\b)`).test(main)) {
       const y = adjust(yardsAfter(main)), kneel = /\bkneels\b/.test(main);
       let pts = val(scoring, 'rush_att') + val(scoring, 'rush_yd') * y + (y >= 40 ? val(scoring, 'rush_40p') : 0);
       if (touchdown && !lost) pts += val(scoring, 'rush_td') + tdLengthBonus('rush', y, scoring);

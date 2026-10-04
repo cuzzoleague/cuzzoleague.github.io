@@ -94,3 +94,28 @@ test('fantasyFeed walks drives, tracks possession, and skips games without track
   assert.equal(items[1].involvements[0].pts, 3.1);
   assert.equal(fantasyFeed(summary, track(['stbrown']), scoring).items.length, 0);
 });
+
+// Week 4, 2026 plays whose totals disagreed with Sleeper's box score.
+test('a direct snap after a formation note is still a run', () => {
+  const r = attributePlay({text: '(Shotgun) Direct snap to C.Watson.  C.Watson up the middle to TB 6 for 3 yards (J.Trotter).', type: 'Rush',
+    possession: 'GB', tracked: track(['wr']), scoring});
+  assert.equal(pts(r, 'wr'), 0.3);
+});
+
+test('a lateral receiver gets only the lateral yards, not the catch', () => {
+  const r = attributePlay({text: '(Shotgun) J.Love pass short right to Bi.Robinson to DAL 25 for 2 yards. Lateral to C.Watson pushed ob at DAL 6 for 19 yards (D.Winters).',
+    type: 'Pass Reception', possession: 'GB', tracked: trackPlayers(['qb', 'wr', 'bijan'], {...players, bijan: {...players.bijan, team: 'GB'}}), scoring});
+  assert.equal(pts(r, 'qb'), 0.84);  // 21 passing yards
+  assert.equal(pts(r, 'bijan'), 0.7); // the catch: 0.5 + 2 yards
+  assert.equal(pts(r, 'wr'), 1.9);   // 19 lateral yards, no reception
+});
+
+test('a recovered fumbled snap that turns into a pass counts the pass, not the fumble yardage', () => {
+  const r = attributePlay({text: 'J.Love to NE 43 for -1 yards. FUMBLES, and recovers at NE 43. J.Love pass short left to C.Watson pushed ob at BUF 36 for 20 yards (C.Gardner-Johnson).',
+    type: 'Fumble Recovery (Own)', possession: 'GB', tracked: track(['qb', 'wr']), scoring});
+  assert.equal(pts(r, 'qb'), 0.8);
+  assert.equal(pts(r, 'wr'), 2.5);
+  const aborted = attributePlay({text: '(Shotgun) J.Love Aborted. G.Barton FUMBLES at TB 6, recovered by GB-J.Love at TB 3. J.Love to TB 1 for -2 yards (B.Cox).',
+    type: 'Fumble Recovery (Own)', possession: 'GB', tracked: track(['qb']), scoring});
+  assert.equal(pts(aborted, 'qb'), 0);
+});
