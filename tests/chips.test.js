@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chipNumbers} from '../site/js/matchups-view.js';
+import {chipNumbers, gameTones} from '../site/js/matchups-view.js';
 
 const side = (pre, live) => ({pre: {expected: pre}, live: {expected: live}});
 const model = over => ({status: 'upcoming', prob: 0.68, actualA: 0, actualB: 0, a: side(130.7, 130.7), b: side(113.8, 113.8), ...over});
@@ -15,6 +15,14 @@ test('during games the live projection shows and colors follow the projected win
   const underdog = chipNumbers(model({status: 'partial', prob: 0.3, actualA: 40, actualB: 20}));
   assert.equal(underdog.toneA, 'r');
   assert.equal(underdog.toneB, 'g');
+});
+
+test('finished NFL games color the winner green and the loser red', () => {
+  const game = (state, away, home) => ({state, away: {score: away}, home: {score: home}});
+  assert.deepEqual(gameTones(game('post', 35, 14)), {away: 'g', home: 'r', final: true});
+  assert.deepEqual(gameTones(game('post', 7, 27)), {away: 'r', home: 'g', final: true});
+  assert.deepEqual(gameTones(game('in', 21, 3)), {away: 'z', home: 'z', final: false});
+  assert.deepEqual(gameTones(game('post', 20, 20)), {away: 'z', home: 'z', final: true});
 });
 
 test('final scores color the actual winner green, keeping the pregame projection', () => {

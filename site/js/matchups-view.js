@@ -281,6 +281,13 @@ const pickIs = (kind, id) => mu.pick?.kind === kind && String(mu.pick.id) === St
 const currentModel = () => mu.pick?.kind === 'matchup' ? mu.models.find(m => m.matchupId === mu.pick.id) : null;
 const currentGame = () => mu.pick?.kind === 'game' ? (mu.games || []).find(g => g.id === mu.pick.id) : null;
 
+// Finished NFL games: winner green, loser red (no colors for ties or games still to finish).
+export function gameTones(g) {
+  if (g.state !== 'post' || g.away.score === g.home.score) return {away: 'z', home: 'z', final: g.state === 'post'};
+  const awayWon = g.away.score > g.home.score;
+  return {away: awayWon ? 'g' : 'r', home: awayWon ? 'r' : 'g', final: true};
+}
+
 function gameStatus(g) {
   if (g.state === 'pre') return kickoff(g.date);
   if (g.state === 'in') return `${g.detail} · ${g.away.score}–${g.home.score}`;
@@ -324,7 +331,9 @@ function renderPicker() {
   }
   const chip = g => {
     const cuzzo = (counts.get(g.away.abbr) || 0) + (counts.get(g.home.abbr) || 0);
-    return `<button type="button" class="pick game ${g.state === 'in' ? 'is-live' : ''}" data-pick="game:${g.id}" aria-pressed="${pickIs('game', g.id)}"><span>${esc(g.away.abbr)} @ ${esc(g.home.abbr)}</span><small>${esc(gameStatus(g))}</small>${cuzzo ? `<em>${plural(cuzzo, 'Cuzzo starter')}</em>` : ''}</button>`;
+    const t = gameTones(g), team = (side, tone) => t.final ? `<i class="sc-${tone}">${esc(side.abbr)}</i>` : esc(side.abbr);
+    const status = t.final ? `Final <i class="sc-${t.away}">${g.away.score}</i>–<i class="sc-${t.home}">${g.home.score}</i>` : esc(gameStatus(g));
+    return `<button type="button" class="pick game ${g.state === 'in' ? 'is-live' : ''} ${t.final ? 'is-final' : ''}" data-pick="game:${g.id}" aria-pressed="${pickIs('game', g.id)}"><span>${team(g.away, t.away)} @ ${team(g.home, t.home)}</span><small>${status}</small>${cuzzo ? `<em>${plural(cuzzo, 'Cuzzo starter')}</em>` : ''}</button>`;
   };
   $('#pbpPicker').innerHTML = `<div class="pick-group"><div class="pick-label">League matchups</div><div class="pick-row">${matchups || '<span class="pick-empty">No matchups this week</span>'}</div></div>
     <div class="pick-group"><div class="pick-label">NFL games · in kickoff order</div>${slots.length ? `<div class="game-slots">${slots.map(s => `<div class="game-slot"><span class="slot-title">${esc(s.label)}</span><div class="pick-row wrap">${s.games.map(chip).join('')}</div></div>`).join('')}</div>` : '<span class="pick-empty">The NFL schedule is unavailable right now.</span>'}</div>`;
