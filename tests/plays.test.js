@@ -119,3 +119,12 @@ test('a recovered fumbled snap that turns into a pass counts the pass, not the f
     type: 'Fumble Recovery (Own)', possession: 'GB', tracked: track(['qb']), scoring});
   assert.equal(pts(aborted, 'qb'), 0);
 });
+
+test('a muffed punt recovered by the kicking team is a recovery but not a forced fumble', () => {
+  const muff = attributePlay({text: 'J.Doe punts 45 yards to ATL 23, Center-C.Stoll. D.Davis MUFFS catch, touched at ATL 23, RECOVERED by GB-K.Smith at ATL 20.',
+    type: 'Punt', possession: 'GB', tracked: track(['GB']), scoring});
+  assert.equal(pts(muff, 'GB'), 1);
+  const stripped = attributePlay({text: 'J.Doe punts 45 yards to ATL 23, Center-C.Stoll. D.Davis to ATL 30 for 7 yards (K.Smith). FUMBLES (K.Smith), RECOVERED by GB-K.Smith at ATL 30.',
+    type: 'Punt', possession: 'GB', tracked: track(['GB']), scoring});
+  assert.equal(pts(stripped, 'GB'), 2);
+});

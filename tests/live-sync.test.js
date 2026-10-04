@@ -34,14 +34,18 @@ test('when Sleeper is first, the later ESPN play is absorbed by credit', () => {
   assert.equal(sync.value(5, 'p'), 14);
 });
 
-test('Sleeper feeds: the most recently changed one wins', () => {
+test('Sleeper feeds: the stat line leads, lineup points fill in until a player has one', () => {
   const {sync, tick} = setup();
-  sync.official(5, 'p', 'matchup', 4);
+  sync.official(5, 'p', 'matchup', 0);
+  assert.equal(sync.value(5, 'p'), 0);
   sync.official(5, 'p', 'stats', 4);
+  assert.equal(sync.value(5, 'p'), 4);
   tick(1000);
   sync.official(5, 'p', 'stats', 9);               // stats updated, lineup feed still stale
   assert.equal(sync.value(5, 'p'), 9);
   tick(1000);
+  sync.official(5, 'p', 'matchup', 4.6);           // the lagging feed moving (but still behind) changes nothing
+  assert.equal(sync.value(5, 'p'), 9);
   sync.official(5, 'p', 'matchup', 9);
   assert.equal(sync.value(5, 'p'), 9);
 });

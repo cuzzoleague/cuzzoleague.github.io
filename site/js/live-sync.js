@@ -21,20 +21,21 @@ export function createLiveSync({clock = () => Date.now(), slack = 0.25, skew = 2
   };
   // ESPN's play text and Sleeper's stats can disagree by a yard or two; bigger plays get a little more room.
   const room = pts => Math.max(slack, 0.15 * Math.abs(pts));
-  // Among Sleeper's feeds, the one that changed most recently is the freshest; first sightings tie at 0.
-  const freshest = s => Object.values(s.sources).reduce((best, src) => !best || src.changedAt > best.changedAt || (src.changedAt === best.changedAt && src.value > best.value) ? src : best, null)?.value ?? null;
+  // Sleeper's weekly stat lines update within seconds; league lineup points trail them by a minute or more.
+  // Use the stat line once a player has one.
+  const leading = s => s.sources.stats ?? s.sources.matchup ?? Object.values(s.sources)[0] ?? null;
 
-  // A Sleeper number for a player: source is 'matchup' (league lineups) or 'stats' (weekly stat lines).
+  // A Sleeper number for a player: source is 'stats' (weekly stat lines) or 'matchup' (league lineups).
   function official(week, id, source, value) {
     if (value == null || !Number.isFinite(value)) return;
     const s = get(`${week}:${id}`), prev = s.sources[source];
-    if (prev && Math.abs(prev.value - value) < 0.005) return;
-    s.sources[source] = {value, changedAt: prev ? clock() : 0};
+    if (prev != null && Math.abs(prev - value) < 0.005) return;
+    s.sources[source] = value;
     const before = s.official;
-    s.official = freshest(s);
+    s.official = leading(s);
     // A player's first Sleeper number only needs reconciling if ESPN plays were already shown for them.
     if (before == null && !s.pending.length) return;
-    const delta = s.official - (before ?? 0);
+    const delta = s.official - (before ?? 0); // a stat line replacing lineup points reconciles the same way
     if (Math.abs(delta) < 0.005) return;
     expire(s);
     // Sleeper's update covers the oldest pending plays: take the run whose total comes closest (ties take more).

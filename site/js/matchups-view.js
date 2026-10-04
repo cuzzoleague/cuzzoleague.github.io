@@ -242,9 +242,11 @@ export async function openWeek(week, {fresh = false} = {}) {
   if (!ctx) return;
   mu.week = Math.min(ctx.lastWeek, Math.max(1, Number(week) || ctx.defaultWeek));
   renderWeekSelect();
-  const request = ++mu.requestId;
-  if (fresh) {
-    await Promise.all([scoreboardFor(mu.week, true), loadMatchups(ctx.league.league_id, mu.week, {fresh: true}).then(e => mu.liveEntries.set(mu.week, e)).catch(() => {})]);
+  const request = ++mu.requestId, live = isLiveWeek(mu.week);
+  // The live week starts from the latest Sleeper numbers rather than waiting for the first poll.
+  if (fresh || live) {
+    await Promise.all([scoreboardFor(mu.week, true), loadMatchups(ctx.league.league_id, mu.week, {fresh: true}).then(e => mu.liveEntries.set(mu.week, e)).catch(() => {}),
+      live ? statsFor(mu.week, true) : null]);
   }
   if (!mu.models.length || mu.models[0]?.week !== mu.week) $('#matchupGrid').innerHTML = '<div class="empty">Loading matchups…</div>';
   const built = await buildModels(mu.week);

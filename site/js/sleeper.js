@@ -4,8 +4,11 @@ const API = 'https://api.sleeper.app';
 const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
 const PLAYER_CACHE = 'cuzzo-players-v2', PLAYER_KEY = 'https://cuzzo.local/players.json', PLAYER_TTL = 24 * 60 * 60 * 1000;
 
+// Sleeper's CDN keeps serving an older copy of a URL for minutes while it revalidates, so live requests
+// add a unique query string to get the latest numbers.
 async function getJson(url, {fresh = false} = {}) {
-  const response = await fetch(url, fresh ? {cache: 'no-store'} : undefined);
+  const target = fresh ? `${url}${url.includes('?') ? '&' : '?'}_=${Date.now()}` : url;
+  const response = await fetch(target, fresh ? {cache: 'no-store'} : undefined);
   if (!response.ok) throw new Error(response.status === 404 ? 'Sleeper could not find that data.' : `Sleeper is unavailable right now (${response.status}).`);
   return response.json();
 }

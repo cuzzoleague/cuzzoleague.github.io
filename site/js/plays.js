@@ -202,7 +202,7 @@ export function attributePlay({text: rawText, type = '', possession, scoringTeam
     const add = (label, pts) => results.push({playerId: player.id, role: 'def', label, pts: round2(pts)});
     const scored = scoringTeam === player.team, defTd = touchdown && scored;
     if (kickPlay) {
-      if (kickingTeam === player.team && recoveredBy === player.team) add('Special-teams fumble recovery', val(scoring, 'def_st_fum_rec') + val(scoring, 'def_st_ff') + (defTd ? val(scoring, 'st_td') : 0));
+      if (kickingTeam === player.team && recoveredBy === player.team) add('Special-teams fumble recovery', val(scoring, 'def_st_fum_rec') + (/\bMUFFS\b/.test(main) ? 0 : val(scoring, 'def_st_ff')) + (defTd ? val(scoring, 'st_td') : 0)); // a muff isn't a forced fumble
       else if (scored && touchdown) add('Return TD', val(scoring, 'st_td'));
       continue;
     }
