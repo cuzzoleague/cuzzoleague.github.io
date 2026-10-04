@@ -1,13 +1,13 @@
 // One fantasy point total per player that every live view shows.
 //
-// Sleeper's numbers are official but lag the action; ESPN's play-by-play usually lands first. A player's
-// shown total is Sleeper's latest number plus any ESPN plays Sleeper hasn't caught up with yet ("pending").
-// When Sleeper's number moves, the oldest pending plays that explain the move are treated as counted.
-// If Sleeper moves first, the unexplained change is held as "credit" so the matching ESPN play,
-// when it arrives, isn't counted twice.
+// Sleeper's numbers are official but usually lag the action; ESPN's play-by-play often lands first, though
+// sometimes Sleeper does. A player's shown total is Sleeper's latest number plus any ESPN plays Sleeper hasn't
+// caught up with yet ("pending"). When Sleeper's number moves, the run of oldest pending plays whose total best
+// explains the move is treated as counted. A move the pending plays don't explain means Sleeper was first: it
+// is held as "credit" so the matching ESPN play, when it arrives, isn't counted twice.
 import {round2} from './util.js';
 
-export function createLiveSync({clock = () => Date.now(), tolerance = 0.6, pendingTtl = 5 * 60_000, creditTtl = 3 * 60_000} = {}) {
+export function createLiveSync({clock = () => Date.now(), slack = 0.25, skew = 20_000, pendingTtl = 5 * 60_000, creditTtl = 3 * 60_000} = {}) {
   const players = new Map(), baselined = new Set(), seen = new Map();
 
   const get = key => {
@@ -19,6 +19,8 @@ export function createLiveSync({clock = () => Date.now(), tolerance = 0.6, pendi
     s.pending = s.pending.filter(p => now - p.at < pendingTtl);
     s.credit = s.credit.filter(c => now - c.at < creditTtl);
   };
+  // ESPN's play text and Sleeper's stats can disagree by a yard or two; bigger plays get a little more room.
+  const room = pts => Math.max(slack, 0.15 * Math.abs(pts));
   // Among Sleeper's feeds, the one that changed most recently is the freshest; first sightings tie at 0.
   const freshest = s => Object.values(s.sources).reduce((best, src) => !best || src.changedAt > best.changedAt || (src.changedAt === best.changedAt && src.value > best.value) ? src : best, null)?.value ?? null;
 
@@ -30,25 +32,35 @@ export function createLiveSync({clock = () => Date.now(), tolerance = 0.6, pendi
     s.sources[source] = {value, changedAt: prev ? clock() : 0};
     const before = s.official;
     s.official = freshest(s);
-    if (before == null) return;
-    let delta = s.official - before;
+    // A player's first Sleeper number only needs reconciling if ESPN plays were already shown for them.
+    if (before == null && !s.pending.length) return;
+    const delta = s.official - (before ?? 0);
     if (Math.abs(delta) < 0.005) return;
     expire(s);
-    while (s.pending.length) {
-      const p = s.pending[0];
-      if (Math.sign(p.pts) !== Math.sign(delta) || Math.abs(p.pts) > Math.abs(delta) + tolerance) break;
-      delta -= p.pts;
-      s.pending.shift();
+    // Sleeper's update covers the oldest pending plays: take the run whose total comes closest (ties take more).
+    let take = 0, gap = Math.abs(delta), sum = 0;
+    s.pending.forEach((p, i) => {
+      sum += p.pts;
+      if (Math.abs(delta - sum) <= gap + 0.005) { take = i + 1; gap = Math.abs(delta - sum); }
+    });
+    const rest = delta - s.pending.slice(0, take).reduce((t, p) => t + p.pts, 0);
+    s.pending = s.pending.slice(take);
+    // What the plays don't explain is Sleeper being first. After a match, small leftovers are just yardage noise.
+    if (take ? Math.sign(rest) === Math.sign(delta) && Math.abs(rest) > room(rest) : Math.abs(rest) >= 0.005) {
+      // A Sleeper number that bounces back (0.3 → 0.4 → 0.3) cancels its own credit.
+      const undo = s.credit.findIndex(c => Math.abs(c.pts + rest) < 0.05);
+      if (undo >= 0) s.credit.splice(undo, 1);
+      else s.credit.push({pts: rest, at: clock()});
     }
-    if (Math.abs(delta) > tolerance) s.credit.push({pts: delta, at: clock()});
   }
 
-  // ESPN plays for one game ({id, involvements: [{playerId, pts}]}). The first look at a game is a baseline:
-  // those plays are assumed to be in Sleeper's numbers already.
+  // ESPN plays for one game ({id, wallclock, involvements: [{playerId, pts}]}). The first look at a game is a
+  // baseline: those plays are assumed to be in Sleeper's numbers already.
   function plays(week, gameId, items) {
     const gameKey = `${week}:${gameId}`, first = !baselined.has(gameKey);
     baselined.add(gameKey);
     for (const item of items) {
+      const happened = Date.parse(item.wallclock || '');
       const perPlayer = new Map();
       for (const inv of item.involvements) perPlayer.set(inv.playerId, (perPlayer.get(inv.playerId) || 0) + inv.pts);
       for (const [playerId, pts] of perPlayer) {
@@ -59,10 +71,12 @@ export function createLiveSync({clock = () => Date.now(), tolerance = 0.6, pendi
         if (Math.abs(delta) < 0.005) continue;
         const s = get(`${week}:${playerId}`);
         expire(s);
-        const credit = s.credit.find(c => Math.sign(c.pts) === Math.sign(delta) && Math.abs(c.pts) >= Math.abs(delta) - tolerance);
+        // Credit only covers plays that happened before Sleeper's move was seen, so a stale credit can't
+        // swallow the plays that follow it.
+        const credit = s.credit.find(c => Math.sign(c.pts) === Math.sign(delta) && Math.abs(delta) <= Math.abs(c.pts) + room(delta) && !(happened > c.at + skew));
         if (credit) {
           credit.pts -= delta;
-          if (Math.abs(credit.pts) <= tolerance) s.credit.splice(s.credit.indexOf(credit), 1);
+          if (Math.abs(credit.pts) < 0.05 || Math.sign(credit.pts) !== Math.sign(delta)) s.credit.splice(s.credit.indexOf(credit), 1);
           continue;
         }
         s.pending.push({pts: delta, at: clock()});
