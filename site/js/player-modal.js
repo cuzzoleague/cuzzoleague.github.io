@@ -3,6 +3,7 @@ import {esc, fmt} from './util.js';
 import {loadPlayerLog, loadSchedule, isTeamId} from './sleeper.js';
 import {pointsFromStats} from './scoring.js';
 import {photo, fullName, positionOf, ownerIndex} from './player-ui.js';
+import {livePoints} from './matchups-view.js';
 
 const $ = sel => document.querySelector(sel);
 const WEEKS = 18;
@@ -52,7 +53,9 @@ function gameLog(ctx, id, season, log, schedule) {
     const game = (schedule || []).find(g => Number(g.week) === week && (g.home === team || g.away === team));
     const opp = game ? (game.home === team ? game.away : `@${game.home}`) : (schedule?.length && team ? 'BYE' : (stat?.opponent || proj?.opponent || '—'));
     if (opp === 'BYE') return `<tr class="bye"><td>${week}</td><td>BYE</td><td colspan="${3 + cols.length}"></td></tr>`;
-    const fpts = stat ? pointsFromStats(stat.stats, scoring) : null;
+    // This week's points come from the same live tally the Matchups tab shows, so the two always agree.
+    const live = String(season) === String(ctx.league.season) ? livePoints(week, id) : null;
+    const fpts = live ?? (stat ? pointsFromStats(stat.stats, scoring) : null);
     const projPts = proj ? pointsFromStats(proj.stats, scoring) : null;
     if (fpts != null) {
       fptsTotal += fpts; games++;
@@ -80,7 +83,7 @@ async function render() {
   const seasons = [0, 1, 2].map(k => String(Number(ctx.league.season) - k));
   const body = $('#playerBody');
   body.innerHTML = `${header(ctx, id)}<div class="seg pd-seasons" role="group" aria-label="Season">${seasons.map(s => `<button type="button" data-season="${s}" aria-pressed="${s === season}">${s}</button>`).join('')}</div><div id="playerLog"><div class="empty">Loading game log…</div></div>`;
-  const [log, schedule] = await Promise.all([loadPlayerLog(id, season), loadSchedule(season)]);
+  const [log, schedule] = await Promise.all([loadPlayerLog(id, season, {fresh: season === String(ctx.league.season)}), loadSchedule(season)]);
   if (current.id !== id || current.season !== season) return;
   $('#playerLog').innerHTML = gameLog(ctx, id, season, log, schedule);
 }

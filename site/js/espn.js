@@ -53,6 +53,33 @@ export async function loadSummary(eventId, {fresh = false} = {}) {
   return json;
 }
 
+// Clock and score as reported inside a game summary (fetched separately from the scoreboard).
+export function summaryStatus(summary) {
+  const comp = summary?.header?.competitions?.[0];
+  if (!comp) return null;
+  const status = comp.status || {}, score = side => Number((comp.competitors || []).find(c => c.homeAway === side)?.score || 0);
+  return {state: status.type?.state || null, statusName: status.type?.name || '', detail: status.type?.shortDetail || status.type?.detail || '',
+    period: status.period != null ? Number(status.period) : null, clock: status.displayClock ?? null, home: score('home'), away: score('away')};
+}
+
+const STATE_ORDER = {pre: 0, in: 1, post: 2};
+// The scoreboard and a game's summary update independently. Copy the summary's clock and score onto the
+// scoreboard game when the summary is further along, so every view shows the freshest of the two.
+export function mergeFresher(game, s) {
+  if (!game || !s?.state) return false;
+  const hasClock = s.period != null && s.clock != null;
+  const mine = [STATE_ORDER[game.state] ?? 0, game.period || 0, -(game.clockSeconds || 0), game.home.score + game.away.score];
+  const theirs = [STATE_ORDER[s.state] ?? 0, hasClock ? s.period : game.period || 0, hasClock ? -clockSeconds(s.clock) : -(game.clockSeconds || 0), s.home + s.away];
+  const i = mine.findIndex((v, k) => v !== theirs[k]);
+  if (i < 0 || theirs[i] < mine[i]) return false;
+  Object.assign(game, {state: s.state, statusName: s.statusName || game.statusName, detail: s.detail || game.detail});
+  if (hasClock) Object.assign(game, {period: s.period, clock: s.clock, clockSeconds: clockSeconds(s.clock)});
+  game.home.score = s.home;
+  game.away.score = s.away;
+  game.fraction = gameFraction(game);
+  return true;
+}
+
 export function gamesByTeam(games) {
   const map = new Map();
   for (const game of games) { map.set(game.home.abbr, game); map.set(game.away.abbr, game); }

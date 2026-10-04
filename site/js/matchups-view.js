@@ -2,7 +2,8 @@
 // matchup or NFL game.
 import {esc, fmt, pct, recordText, plural} from './util.js';
 import {loadWeekly, loadMatchups, isTeamId} from './sleeper.js';
-import {loadScoreboard, loadSummary, gamesByTeam} from './espn.js';
+import {loadScoreboard, loadSummary, gamesByTeam, summaryStatus, mergeFresher} from './espn.js';
+import {createLiveSync} from './live-sync.js';
 import {pointsFromStats, activeSlots, slotLabel} from './scoring.js';
 import {lineupOutlook, teamModelOutlook, winProbability, isTossUp} from './winprob.js';
 import {trackPlayers, fantasyFeed, periodLabel} from './plays.js';
@@ -14,7 +15,8 @@ import {POSITIONS, POSITION_NAMES, positionOf, fullName, shortName, photo, owner
 const $ = sel => document.querySelector(sel);
 const INJURY = {Questionable: 'Q', Doubtful: 'D', Out: 'O', IR: 'IR', PUP: 'PUP', Sus: 'SUS', NA: 'NA', DNR: 'DNR', COV: 'COV'};
 // pick is null until someone chooses: {kind: 'matchup', id: matchupId} or {kind: 'game', id: espnEventId}.
-const mu = {week: null, pick: null, pickWeek: null, filter: 'all', game: '', gameTab: 'overview', gameCands: null, gameLoading: false, timer: null, updatedAt: null, requestId: 0,
+// sync holds one live fantasy total per player (see live-sync.js); gameFeeds caches each NFL game's fantasy plays.
+const mu = {sync: createLiveSync(), gameFeeds: new Map(), weekStats: new Map(), week: null, pick: null, pickWeek: null, filter: 'all', game: '', gameTab: 'overview', gameCands: null, gameLoading: false, timer: null, updatedAt: null, requestId: 0,
   scoreboards: new Map(), projections: new Map(), projTeams: new Map(), liveEntries: new Map(), models: [],
   feed: [], feedKey: '', feedGames: [], feedError: '', seen: new Set(), shownPoints: new Map(), flashUntil: new Map(), feedLoading: false};
 let getCtx = () => null, isVisible = () => false, onLive = () => {};
@@ -46,6 +48,41 @@ async function projectionsFor(week) {
   } catch (error) { console.warn('Projections unavailable', error); }
   mu.projections.set(week, map);
   return map;
+}
+
+const isLiveWeek = week => { const ctx = getCtx(); return ctx && !ctx.seasonOver && week === ctx.nflWeek; };
+
+// Sleeper's weekly stat lines double as a second official source for the live tally.
+async function statsFor(week, fresh = false) {
+  const ctx = getCtx();
+  const stats = await loadWeekly('stats', ctx.league.season, week, {fresh}).catch(() => mu.weekStats.get(week) || new Map());
+  mu.weekStats.set(week, stats);
+  if (isLiveWeek(week)) for (const [id, row] of stats) mu.sync.official(week, id, 'stats', pointsFromStats(row.stats, ctx.league.scoring_settings));
+  return stats;
+}
+
+// The one number every view shows for a player: the live tally during the current week, Sleeper's final otherwise.
+const pointsFor = (week, id, fallback) => (isLiveWeek(week) ? mu.sync.value(week, id) : null) ?? fallback;
+export const livePoints = (week, id) => (isLiveWeek(week) ? mu.sync.value(week, id) : null);
+
+// Fantasy plays for one NFL game, tracking every fantasy-relevant player plus anyone on a Cuzzo roster.
+// Live games are refetched by the poller; everything else is cached.
+async function gameFeed(week, g, {fresh = false} = {}) {
+  const key = `${week}:${g.id}`, cached = mu.gameFeeds.get(key);
+  if (g.state === 'pre') return null;
+  if (cached && !fresh) return cached;
+  const ctx = getCtx(), players = ctx.players || await ctx.playersReady.catch(() => ({})) || {};
+  const summary = await loadSummary(g.id, {fresh: fresh && g.state === 'in'}).catch(() => null);
+  if (!summary) return cached || null;
+  mergeFresher(g, summaryStatus(summary));
+  const stats = mu.weekStats.get(week) || await statsFor(week);
+  const cands = gameCandidates(week, g, stats, players);
+  const rostered = [...ownerIndex(ctx, week).keys()].filter(id => [g.home.abbr, g.away.abbr].includes(playerTeam(id)));
+  const items = fantasyFeed(summary, trackPlayers([...cands.map(c => c.id), ...rostered], players), scoring()).items;
+  if (isLiveWeek(week)) mu.sync.plays(week, g.id, items);
+  const feed = {items, cands, live: g.state === 'in'};
+  mu.gameFeeds.set(key, feed);
+  return feed;
 }
 
 const playerTeam = id => getCtx().players?.[id]?.team || mu.projTeams.get(id) || (/^[A-Z]{2,3}$/.test(id) ? id : null);
@@ -100,10 +137,13 @@ async function buildModels(week) {
     const g = team ? byTeam.get(team) : null;
     return g ? g.fraction : 1; // bye weeks and free agents have nothing left to play
   };
-  const hasProj = proj.size > 0;
+  const hasProj = proj.size > 0, live = isLiveWeek(week);
+  if (live) for (const entry of entriesFor(week)) for (const [id, pts] of Object.entries(entry.players_points || {})) mu.sync.official(week, id, 'matchup', Number(pts));
   const models = pairsFor(entriesFor(week)).filter(p => p.entries.length === 2).map(({matchupId, entries}) => {
     const sides = entries.map(entry => {
-      const id = Number(entry.roster_id), starters = startersOf(entry), points = entry.players_points || {};
+      const id = Number(entry.roster_id), starters = startersOf(entry), official = entry.players_points || {};
+      const points = Object.fromEntries(starters.filter(p => p && p !== '0').map(p => [p, pointsFor(week, p, Number(official[p] || 0))]));
+      const total = Object.values(points).reduce((t, v) => t + v, 0);
       const s = ctx.season.teams.get(id);
       let live = lineupOutlook({starters, points, projections: proj, progress});
       let pre = lineupOutlook({starters, points: {}, projections: proj, progress: () => 0});
@@ -113,10 +153,12 @@ async function buildModels(week) {
         if (state === 'upcoming') live = pre;
       }
       const done = starters.filter(p => p && p !== '0').every(p => progress(p) >= 1);
-      return {id, entry, starters, points, live, pre, done, team: ctx.teams.get(id) || {name: `Team ${id}`}, stats: s};
+      return {id, entry, starters, points, total, live, pre, done, team: ctx.teams.get(id) || {name: `Team ${id}`}, stats: s};
     });
     const [a, b] = sides;
-    const actualA = Number(a.entry.custom_points ?? a.entry.points ?? a.live.actual), actualB = Number(b.entry.custom_points ?? b.entry.points ?? b.live.actual);
+    // During the live week totals are the synced starter points; afterwards Sleeper's official totals stand.
+    const teamTotal = x => Number(x.entry.custom_points ?? (live ? Math.round(x.total * 100) / 100 : x.entry.points ?? x.total));
+    const actualA = teamTotal(a), actualB = teamTotal(b);
     const started = sides.some(x => x.live.playing || x.live.yetToPlay < x.starters.length) && state !== 'upcoming';
     const final = (state === 'final' || (a.done && b.done)) && started;
     const status = final ? 'final' : sides.some(x => x.live.playing) ? 'live' : started ? 'partial' : 'upcoming';
@@ -340,21 +382,17 @@ async function refreshMatchup({fresh = false} = {}) {
   renderMatchup();
   const players = ctx.players || await ctx.playersReady.catch(() => ({}));
   if (key !== mu.feedKey) return;
-  const tracked = trackPlayers([...m.a.starters, ...m.b.starters], players || {});
-  const teams = new Set(tracked.map(t => t.team).filter(Boolean));
+  const starters = new Set([...m.a.starters, ...m.b.starters]);
+  const teams = new Set([...starters].map(playerTeam).filter(Boolean));
   const games = (mu.games || []).filter(g => (teams.has(g.home.abbr) || teams.has(g.away.abbr)) && g.state !== 'pre');
   mu.feedGames = games;
   if (!games.length) { mu.feedLoading = false; renderMatchup(); return; }
   mu.feedLoading = !mu.feed.length;
   if (mu.feedLoading) renderMatchup();
-  const results = await Promise.allSettled(games.map(g => loadSummary(g.id, {fresh: fresh && g.state === 'in'})));
+  const feeds = await Promise.all(games.map(g => gameFeed(m.week, g, {fresh: fresh && g.state === 'in'}).catch(() => null)));
   if (key !== mu.feedKey) return;
-  const items = [];
-  let failed = 0;
-  for (const r of results) {
-    if (r.status !== 'fulfilled') { failed++; continue; }
-    items.push(...fantasyFeed(r.value, tracked, scoring()).items);
-  }
+  const failed = feeds.filter(f => !f).length;
+  const items = feeds.flatMap(f => f?.items || []).map(x => ({...x, involvements: x.involvements.filter(i => starters.has(i.playerId))})).filter(x => x.involvements.length);
   items.sort((x, y) => (Date.parse(y.wallclock) || 0) - (Date.parse(x.wallclock) || 0) || y.seq - x.seq);
   const firstLoad = !mu.feed.length;
   Object.assign(mu, {feed: items, feedError: failed ? `${plural(failed, 'game feed')} could not be loaded.` : '', feedLoading: false, updatedAt: new Date()});
@@ -406,7 +444,7 @@ function renderMatchup(firstLoad = false) {
   keepFeedScroll(() => {
     $('#pbpBody').innerHTML = `<div class="scoreboard"><div class="sb-team a">${avatar(m.a.team, 'lg')}<div><strong>${esc(m.a.team.name)}</strong><small>${esc(m.a.team.manager || '')}</small></div></div><div class="sb-mid">${mid}</div><div class="sb-team b">${avatar(m.b.team, 'lg')}<div><strong>${esc(m.b.team.name)}</strong><small>${esc(m.b.team.manager || '')}</small></div></div></div>
       <div class="pbp-layout"><div class="lineups">${lineupHtml(m, m.a, 'a')}${lineupHtml(m, m.b, 'b')}</div><div>${matchupFeedHtml(m)}</div></div>
-      <p class="pbp-note">Play values are estimated from ESPN's play-by-play using this league's scoring; the lineup totals come straight from Sleeper and are official. D/ST points-allowed bonuses are only settled at the end of each game. Tap a player for their fantasy history.${mu.feedError ? ` ${esc(mu.feedError)}` : ''}</p>`;
+      <p class="pbp-note">Play values are estimated from ESPN's play-by-play using this league's scoring. During games, lineup points add new plays the moment ESPN posts them and switch to Sleeper's official numbers as soon as Sleeper catches up. D/ST points-allowed bonuses are only settled at the end of each game. Tap a player for their fantasy history.${mu.feedError ? ` ${esc(mu.feedError)}` : ''}</p>`;
   });
 }
 
@@ -414,15 +452,15 @@ function renderMatchup(firstLoad = false) {
 const CAP = {QB: 3, RB: 5, WR: 6, TE: 4, K: 2, DEF: 1};
 
 // Everyone worth showing for a game: players with stats, players projected for points, and both defenses.
-function gameCandidates(g, stats, players) {
-  const proj = mu.projections.get(mu.week) || new Map(), teams = [g.away.abbr, g.home.abbr], ids = new Set(teams);
+function gameCandidates(week, g, stats, players) {
+  const proj = mu.projections.get(week) || new Map(), teams = [g.away.abbr, g.home.abbr], ids = new Set(teams);
   for (const [id, row] of stats) if (teams.includes(row.team)) ids.add(id);
   for (const [id, pts] of proj) if (pts >= 0.5 && teams.includes(mu.projTeams.get(id))) ids.add(id);
   const active = st => st && ['pass_att', 'rush_att', 'rec_tgt', 'rec', 'fga', 'xpa'].some(k => Number(st[k]) > 0);
   return [...ids].map(id => {
     const row = stats.get(id);
     return {id, pos: positionOf(id, players, row?.player?.position), team: isTeamId(id) ? id : row?.team || mu.projTeams.get(id) || players?.[id]?.team,
-      pts: row ? pointsFromStats(row.stats, scoring()) : null, proj: proj.has(id) ? proj.get(id) : null, stats: row?.stats || null};
+      pts: pointsFor(week, id, row ? pointsFromStats(row.stats, scoring()) : null), proj: proj.has(id) ? proj.get(id) : null, stats: row?.stats || null};
   }).filter(c => POSITIONS.includes(c.pos) && teams.includes(c.team) && (c.pos === 'DEF' || c.pts || active(c.stats) || (c.proj ?? 0) >= 0.5));
 }
 
@@ -434,17 +472,14 @@ async function refreshGame({fresh = false} = {}) {
   renderGame();
   const players = ctx.players || await ctx.playersReady.catch(() => ({}));
   if (key !== mu.feedKey) return;
-  const live = fresh && g.state === 'in';
-  const [stats, summary] = await Promise.all([
-    loadWeekly('stats', ctx.league.season, mu.week, {fresh: live}).catch(() => new Map()),
-    g.state === 'pre' ? Promise.resolve(null) : loadSummary(g.id, {fresh: live}).catch(() => null)
-  ]);
+  const live = fresh && g.state === 'in', week = mu.week;
+  const stats = live || !mu.weekStats.has(week) ? await statsFor(week, live) : mu.weekStats.get(week);
+  const feed = await gameFeed(week, g, {fresh: live}).catch(() => null);
   if (key !== mu.feedKey) return;
   const firstLoad = !mu.feed.length;
-  mu.gameCands = gameCandidates(g, stats, players || {});
-  const tracked = trackPlayers(mu.gameCands.map(c => c.id), players || {});
-  mu.feed = summary ? fantasyFeed(summary, tracked, scoring()).items.sort((x, y) => y.seq - x.seq) : [];
-  Object.assign(mu, {feedError: g.state !== 'pre' && !summary ? "ESPN's play-by-play for this game could not be loaded." : '', gameLoading: false, updatedAt: new Date()});
+  mu.gameCands = gameCandidates(week, g, stats, players || {});
+  mu.feed = feed ? [...feed.items].sort((x, y) => y.seq - x.seq) : [];
+  Object.assign(mu, {feedError: g.state !== 'pre' && !feed ? "ESPN's play-by-play for this game could not be loaded." : '', gameLoading: false, updatedAt: new Date()});
   renderGame(firstLoad);
 }
 
@@ -492,7 +527,7 @@ function renderGame(firstLoad = false) {
     : gameFeedHtml(g, owners);
   keepFeedScroll(() => {
     $('#pbpBody').innerHTML = `${gameBoard(g)}${tabs}<div class="game-body">${body}</div>
-      <p class="pbp-note">Fantasy points use this league's scoring on Sleeper's stats; play values are estimated from ESPN's play-by-play. Under each name is the Cuzzo team that rosters the player ("bench" if they aren't starting this week). Tap any player for their fantasy history.${mu.feedError ? ` ${esc(mu.feedError)}` : ''}</p>`;
+      <p class="pbp-note">Fantasy points use this league's scoring. During games they add new plays the moment ESPN posts them and switch to Sleeper's official numbers once Sleeper catches up; play values are estimated from ESPN's play-by-play. Under each name is the Cuzzo team that rosters the player ("bench" if they aren't starting this week). Tap any player for their fantasy history.${mu.feedError ? ` ${esc(mu.feedError)}` : ''}</p>`;
   });
 }
 
@@ -523,13 +558,20 @@ async function tick() {
   try {
     await scoreboardFor(ctx.nflWeek, true);
     if (isVisible() && mu.week === ctx.nflWeek) {
-      const entries = await loadMatchups(ctx.league.league_id, mu.week, {fresh: true}).catch(() => null);
-      if (entries?.length) mu.liveEntries.set(mu.week, entries);
-      const built = await buildModels(mu.week);
+      const week = mu.week, games = mu.scoreboards.get(week) || [];
+      const [entries] = await Promise.all([loadMatchups(ctx.league.league_id, week, {fresh: true}).catch(() => null), statsFor(week, true)]);
+      if (entries?.length) mu.liveEntries.set(week, entries);
+      // Fetch plays for every game in progress that matters to the league (plus the one being viewed), and once
+      // more right after a game ends, so the shared tally sees each play as soon as ESPN posts it.
+      const teams = new Set([...ownerIndex(ctx, week)].filter(([, o]) => o.starter).map(([id]) => playerTeam(id)));
+      const targets = games.filter(g => (g.state === 'in' || (g.state === 'post' && mu.gameFeeds.get(`${week}:${g.id}`)?.live))
+        && (teams.has(g.home.abbr) || teams.has(g.away.abbr) || pickIs('game', g.id)));
+      await Promise.all(targets.map(g => gameFeed(week, g, {fresh: true}).catch(() => null)));
+      const built = await buildModels(week);
       Object.assign(mu, {models: built.models, byTeam: built.byTeam, state: built.state, games: built.games});
       renderWeekBoard();
       renderPicker();
-      await refreshFeed({fresh: true});
+      await refreshFeed();
     }
   } catch (error) { console.warn('Live refresh failed', error); }
   finally { mu.updatedAt = new Date(); renderLiveStatus(); schedule(); }

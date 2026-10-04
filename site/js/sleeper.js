@@ -90,13 +90,13 @@ export async function loadPlayers() {
 
 // One player's stat lines and projections for a season, keyed by week (null = no game).
 const logCache = new Map();
-export function loadPlayerLog(id, season) {
+export function loadPlayerLog(id, season, {fresh = false} = {}) {
   const key = `${id}:${season}`;
-  if (!logCache.has(key)) {
+  if (fresh || !logCache.has(key)) {
     const query = `season_type=regular&season=${season}&grouping=week`;
     logCache.set(key, Promise.all([
-      getJson(`${API}/stats/nfl/player/${id}?${query}`).catch(() => ({})),
-      getJson(`${API}/projections/nfl/player/${id}?${query}`).catch(() => ({}))
+      getJson(`${API}/stats/nfl/player/${id}?${query}`, {fresh}).catch(() => ({})),
+      getJson(`${API}/projections/nfl/player/${id}?${query}`, {fresh}).catch(() => ({}))
     ]).then(([stats, proj]) => ({stats: stats || {}, proj: proj || {}})));
   }
   return logCache.get(key);
