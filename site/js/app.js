@@ -1,6 +1,7 @@
 // Boots the site: loads league data from Sleeper, runs the analytics, and wires up tabs and controls.
 import {LEAGUE_ID} from './config.js';
-import {loadLeagueCore, loadAllMatchups, loadTransactions, loadPlayers, loadWeekly, sleeper, avatarUrl} from './sleeper.js';
+import {loadLeagueCore, loadAllMatchups, loadTransactions, loadDraft, loadPlayers, loadWeekly, sleeper, avatarUrl} from './sleeper.js';
+import {draftBoard} from './draft.js';
 import {analyzeSeason, entryPoints} from './analytics.js';
 import {gradeMoves, weeklyPointsLookup} from './moves.js';
 import {loadHistory, readHistoryCache, writeHistoryCache, buildSeason, champions} from './history.js';
@@ -115,6 +116,7 @@ function renderLeague() {
   League.renderHeatmap(ctx);
   League.renderSwaps(ctx);
   League.renderProfiles(ctx);
+  League.renderDraft(ctx);
   League.renderMoves(ctx);
   League.renderBump(ctx);
   League.renderHistory(ctx);
@@ -155,15 +157,23 @@ async function loadSecondary(current) {
     League.renderReport(ctx);
   }).catch(error => console.warn('Player directory unavailable', error));
 
+  const transactionsReady = loadTransactions(LEAGUE_ID, current.lastWeek);
   const movesJob = (async () => {
-    const [transactions, players] = await Promise.all([loadTransactions(LEAGUE_ID, current.lastWeek), current.playersReady]);
+    const [transactions, players] = await Promise.all([transactionsReady, current.playersReady]);
     const statsByWeek = new Map(await Promise.all(current.season.playedWeeks.map(async w => [w, await loadWeekly('stats', current.league.season, w).catch(() => new Map())])));
     const pointsFor = weeklyPointsLookup(current.weeks, statsByWeek, stats => pointsFromStats(stats, current.league.scoring_settings));
     return gradeMoves({transactions, weeks: current.weeks, completedWeeks: current.season.playedWeeks, rosterPositions: current.league.roster_positions, players, pointsFor});
   })().then(moves => { if (ctx === current) { ctx.moves = moves; League.renderMoves(ctx); League.renderAwards(ctx); } })
     .catch(error => { console.error(error); if (ctx === current) { ctx.movesError = error.message || 'Sleeper data unavailable'; League.renderMoves(ctx); League.renderAwards(ctx); } });
 
-  await Promise.allSettled([historyJob, playersJob, movesJob]);
+  const draftJob = (async () => {
+    const [found, transactions] = await Promise.all([loadDraft(LEAGUE_ID, current.league.season), transactionsReady.catch(() => [])]);
+    if (!found) return null;
+    return draftBoard({...found, rosters: current.rosters, weeks: current.weeks, completedWeeks: current.season.playedWeeks, transactions});
+  })().then(board => { if (ctx === current) { ctx.draft = board; ctx.draftError = ''; League.renderDraft(ctx); } })
+    .catch(error => { console.error(error); if (ctx === current) { ctx.draftError = error.message || 'Sleeper draft data unavailable'; League.renderDraft(ctx); } });
+
+  await Promise.allSettled([historyJob, playersJob, movesJob, draftJob]);
 }
 
 async function load({quiet = false} = {}) {
@@ -191,7 +201,8 @@ async function load({quiet = false} = {}) {
       const season = analyzeSeason({rosterIds: [...teams.keys()], weeks, completedWeeks: completed, remainingWeeks: remaining, rosterPositions: league.roster_positions, playoffTeams, seed: `${league.league_id}:${completed.length}`, sims: SIMS});
       const previous = ctx, players = previous?.players || null;
       ctx = {state, league, users, rosters, winners, losers, weeks, teams, season, nflWeek, defaultWeek, lastWeek, seasonOver, preseason, sims: SIMS,
-        players, playersReady: players ? Promise.resolve(players) : loadPlayers(), moves: null, movesError: '', history: previous?.history || null, historyError: '', bench: null};
+        players, playersReady: players ? Promise.resolve(players) : loadPlayers(), moves: null, movesError: '', history: previous?.history || null, historyError: '', bench: null,
+        regularWeeks, draft: previous?.draft || null, draftError: ''};
       const current = ctx;
       current.playersReady.then(p => { current.players = p; }).catch(() => {});
       if (players) ctx.bench = benchPoints();

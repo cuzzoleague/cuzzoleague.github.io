@@ -9,6 +9,7 @@ with no backend: the browser pulls everything live from the public Sleeper and E
 - **Power rankings**: a 0–100 power score (40% all-play win rate, 35% scoring strength, 25% recent form), plus a team report with expected wins, schedule luck, all-play record, and simulated playoff and bye odds.
 - **Weekly hardware**: awards like Top Dog, Heartbreak Hotel, Horseshoe, Steady Eddie, and Bench Blunder.
 - **Scoring heatmap**, **schedule swap** matrix, and **scoring ranges** (floor, average, and ceiling for each team).
+- **Draft postmortem**: every pick by round and draft slot, colored by points per start against other drafted players at the same position, with dropped and traded picks marked.
 - **Trade & waiver grades**: each week's best possible lineup with and without a move.
 - **Power movement**: a bump chart of weekly power ranks.
 - **All-time leaderboard**: every linked Sleeper season, with champions, records, points per game, and a sortable legacy score.

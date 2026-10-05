@@ -155,27 +155,71 @@ export function renderAwards(ctx) {
 }
 
 // ---------------------------------------------------------------- Heatmap + schedule swap
+// Grid labels share one look across the heatmap, schedule swap, and draft board.
+const colHead = (text, title = text) => `<th scope="col" title="${esc(title)}"><span class="grid-label">${esc(text)}</span></th>`;
+const rowHead = (text, title = text) => `<th scope="row" title="${esc(title)}"><span class="grid-label">${esc(text)}</span></th>`;
+
 export function renderHeatmap(ctx) {
-  const holder = $('#heatmapTable'), rows = byPower(ctx), weeks = ctx.season.playedWeeks, n = ctx.season.teams.size;
-  if (!weeks.length) { holder.innerHTML = '<div class="empty">No completed weeks yet.</div>'; return; }
+  const holder = $('#heatmapTable'), rows = byPower(ctx), played = ctx.season.playedWeeks, n = ctx.season.teams.size;
+  if (!played.length) { holder.innerHTML = '<div class="empty">No completed weeks yet.</div>'; return; }
   const bucket = rank => Math.max(1, Math.min(5, Math.ceil((n > 1 ? 1 - (rank - 1) / (n - 1) : 1) * 5)));
-  holder.innerHTML = `<table class="data-table heat"><thead><tr><th scope="col" style="text-align:left">Team</th>${weeks.map(w => `<th scope="col">Wk ${w}</th>`).join('')}<th scope="col">Avg</th></tr></thead><tbody>${rows.map(s => {
+  // The whole regular season is laid out; weeks still to come stay empty.
+  const weeks = Array.from({length: Math.max(ctx.regularWeeks || 0, ...played)}, (_, i) => i + 1);
+  holder.innerHTML = `<table class="data-table heat"><thead><tr>${colHead('Team')}${weeks.map(w => colHead(`Wk ${w}`, `Week ${w}`)).join('')}${colHead('Avg', 'Average')}</tr></thead><tbody>${rows.map(s => {
     const t = teamOf(ctx, s.id), byWeek = new Map(s.weekly.map(r => [r.week, r]));
-    return `<tr><th scope="row" title="${esc(t.name)}">${esc(t.name)}</th>${weeks.map(w => { const r = byWeek.get(w); return r ? `<td class="h${bucket(r.rank)}" title="Week ${w}: ${fmt(r.pts)} (#${r.rank})${r.result ? `, ${r.result} vs ${esc(teamOf(ctx, r.opp).name)}` : ''}">${fmt(r.pts)}<small>#${r.rank}${r.result ? ` · ${r.result}` : ''}</small></td>` : '<td>—</td>'; }).join('')}<td><b>${fmt(s.avg)}</b></td></tr>`;
+    return `<tr>${rowHead(t.name)}${weeks.map(w => {
+      const r = byWeek.get(w);
+      if (!r) return `<td class="heat-future" aria-label="Week ${w}: ${played.includes(w) ? 'no score' : 'not played yet'}"></td>`;
+      return `<td class="h${bucket(r.rank)}" title="Week ${w}: ${fmt(r.pts)} (#${r.rank})${r.result ? `, ${r.result} vs ${esc(teamOf(ctx, r.opp).name)}` : ''}">${fmt(r.pts)}<small>#${r.rank}${r.result ? ` · ${r.result}` : ''}</small></td>`;
+    }).join('')}<td class="heat-avg"><b>${fmt(s.avg)}</b></td></tr>`;
   }).join('')}</tbody></table>`;
+}
+
+// A borrowed schedule's record against the team's real one; a tie counts as half a win.
+export function swapTone(record, actual) {
+  const score = r => r.w + (r.t || 0) / 2;
+  return score(record) > score(actual) ? 'better' : score(record) < score(actual) ? 'worse' : 'same';
 }
 
 export function renderSwaps(ctx) {
   const holder = $('#swapTable'), rows = byPower(ctx), records = ctx.season.schedule;
   if (!ctx.season.playedWeeks.length) { holder.innerHTML = '<div class="empty">No completed weeks yet.</div>'; return; }
   const short = name => name.length > 11 ? `${name.slice(0, 10)}…` : name;
-  holder.innerHTML = `<table class="data-table swap"><thead><tr><th scope="col" style="text-align:left">Scores ↓ / Schedule →</th>${rows.map(s => `<th scope="col" title="${esc(teamOf(ctx, s.id).name)}">${esc(short(teamOf(ctx, s.id).name))}</th>`).join('')}</tr></thead><tbody>${rows.map(s => {
+  holder.innerHTML = `<table class="data-table swap"><thead><tr>${colHead('Scores ↓ / Schedule →', 'Row = scores, column = schedule')}${rows.map(s => colHead(short(teamOf(ctx, s.id).name), teamOf(ctx, s.id).name)).join('')}</tr></thead><tbody>${rows.map(s => {
     const actual = records[s.id][s.id];
-    return `<tr><th scope="row" title="${esc(teamOf(ctx, s.id).name)}">${esc(teamOf(ctx, s.id).name)}</th>${rows.map(o => {
-      const r = records[s.id][o.id], cls = s.id === o.id ? 'actual' : r.w > actual.w ? 'better' : r.w < actual.w ? 'worse' : '';
-      return `<td class="${cls}" title="${esc(teamOf(ctx, s.id).name)} with ${esc(teamOf(ctx, o.id).name)}'s schedule">${recordText(r.w, r.l, r.t)}</td>`;
+    return `<tr>${rowHead(teamOf(ctx, s.id).name)}${rows.map(o => {
+      const r = records[s.id][o.id];
+      return `<td class="${swapTone(r, actual)}${s.id === o.id ? ' actual' : ''}" title="${esc(teamOf(ctx, s.id).name)} with ${esc(teamOf(ctx, o.id).name)}'s schedule">${recordText(r.w, r.l, r.t)}</td>`;
     }).join('')}</tr>`;
-  }).join('')}</tbody></table><p class="table-note">Outlined cells are real records. Green means more wins than reality, red means fewer. If you borrow the schedule of a team you actually played, you face that team instead.</p>`;
+  }).join('')}</tbody></table><p class="table-note">Green beats the team's real record, red is worse, and gray matches it (a tie counts as half a win). Outlined cells are real records. If you borrow the schedule of a team you actually played, you face that team instead.</p>`;
+}
+
+// ---------------------------------------------------------------- Draft postmortem
+const pickName = p => p.position === 'DEF' ? `${p.playerId} D/ST` : p.name.replace(/^(\S)\S*\s+/, '$1. ');
+
+function pickHtml(p) {
+  const tone = !p.retained ? 'gone' : p.tier ? `h${p.tier}` : 'ungraded';
+  const rate = p.perStart == null ? 'no starts yet' : `${fmt(p.perStart)} points per start`;
+  const grade = p.quality == null ? 'grade pending' : `${ordinal(Math.round(p.quality * 100))} percentile among drafted ${p.position}s`;
+  const label = [`${p.name}, ${p.position}, pick ${p.pickNo}`, p.retained ? '' : `${p.departure} by the drafting team`, plural(p.starts, 'start'), `${fmt(p.points)} points`, rate, grade].filter(Boolean).join(' · ');
+  return `<button type="button" class="draft-pick ${tone}" data-player="${esc(p.playerId)}" title="${esc(label)}" aria-label="${esc(label)}"><b>${esc(pickName(p))}</b><small>${esc(p.position)} · #${p.pickNo}${p.perStart != null ? ` · ${fmt(p.perStart)}/start` : ''}</small>${p.retained ? '' : `<em class="${p.departure === 'Traded' ? 'traded' : 'dropped'}">${esc(p.departure)}</em>`}</button>`;
+}
+
+export function renderDraft(ctx) {
+  const holder = $('#draftBoard'), board = ctx.draft;
+  if (!holder) return;
+  if (!board) { holder.innerHTML = ctx.draftError ? `<div class="empty">Couldn't load the draft from Sleeper. ${esc(ctx.draftError)}</div>` : '<div class="empty">Loading the draft board…</div>'; return; }
+  if (!board.picks.length) { holder.innerHTML = '<div class="empty">No draft picks yet. The board fills in after the draft.</div>'; return; }
+  const kept = id => board.picks.filter(p => p.rosterId === id && p.retained).length, made = id => board.picks.filter(p => p.rosterId === id).length;
+  const head = board.columns.map(c => {
+    const t = teamOf(ctx, c.rosterId);
+    return `<th scope="col" title="${esc(t.name)}: ${kept(c.rosterId)} of ${made(c.rosterId)} picks still on the roster"><span class="grid-label draft-team"><small>${c.slot ? `Pick ${c.slot} · ` : ''}${kept(c.rosterId)}/${made(c.rosterId)} kept</small><b>${esc(t.name)}</b></span></th>`;
+  }).join('');
+  const body = board.rounds.map(({round, cells}) => `<tr>${rowHead(`Rd ${round}`, `Round ${round}`)}${board.columns.map(c => {
+    const picks = cells[c.rosterId] || [];
+    return `<td>${picks.length ? picks.map(pickHtml).join('') : '<span class="draft-none" aria-label="No pick">—</span>'}</td>`;
+  }).join('')}</tr>`).join('');
+  holder.innerHTML = `<div class="draft-scroll" tabindex="0" role="region" aria-label="Draft board. Scrolls sideways for more teams and down for more rounds."><table class="data-table draft"><thead><tr>${colHead('Round')}${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 // ---------------------------------------------------------------- Scoring ranges

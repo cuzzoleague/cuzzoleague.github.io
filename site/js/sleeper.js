@@ -39,6 +39,16 @@ export async function loadTransactions(leagueId, lastWeek) {
   return [...new Map(lists.flat().filter(Boolean).map(tx => [tx.transaction_id, tx])).values()];
 }
 
+// This season's draft and its picks (the completed one when there's a choice), or null before any draft exists.
+export async function loadDraft(leagueId, season) {
+  const drafts = await sleeper(`league/${leagueId}/drafts`);
+  if (!Array.isArray(drafts) || !drafts.length) return null;
+  const chosen = drafts.find(d => String(d.season) === String(season) && d.status === 'complete') || drafts.find(d => d.status === 'complete') || drafts[0];
+  const [draft, picks] = await Promise.all([sleeper(`draft/${chosen.draft_id}`), sleeper(`draft/${chosen.draft_id}/picks`)]);
+  if (!draft || !Array.isArray(picks)) throw new Error('Sleeper returned incomplete draft data.');
+  return {draft, picks};
+}
+
 // Weekly stat lines or projections for every fantasy-relevant player: Map<player_id, stats>.
 const weeklyCache = new Map();
 export async function loadWeekly(kind, season, week, {fresh = false} = {}) {
