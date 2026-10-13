@@ -237,6 +237,18 @@ th[scope="row"] .grid-label { padding: 9px 10px; max-width: 180px; }
 .draft-pick em.dropped { background: var(--bad); }
 .draft-pick em.traded { background: #6941a5; }
 .draft-none { display: flex; align-items: center; justify-content: center; height: 62px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); }
+/* Phones: bigger picks that are easier to read and tap; the board scrolls sideways for more teams. */
+@media (max-width: 620px) {
+  .draft td { min-width: 178px; }
+  .draft-team { width: 178px; height: 64px; display: flex; flex-direction: column; justify-content: center; white-space: normal; }
+  .draft-team b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; }
+  .draft th[scope="row"] .grid-label { width: 90px; height: 90px; }
+  .draft-pick { width: 178px; height: 90px; padding: 8px 10px; }
+  .draft-pick b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; font-size: 13.5px; line-height: 1.2; }
+  .draft-pick small { font-size: 11.2px; }
+  .draft-pick em { font-size: 10px; }
+  .draft-none { height: 90px; }
+}
 
 /* ============ Profiles chart ============ */
 .profile-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
