@@ -195,6 +195,7 @@ export function renderSwaps(ctx) {
 }
 
 // ---------------------------------------------------------------- Draft postmortem
+// Phones have room for the full name; the tighter desktop cards use the short form (CSS shows one of the two).
 const pickName = p => p.position === 'DEF' ? `${p.playerId} D/ST` : p.name.replace(/^(\S)\S*\s+/, '$1. ');
 
 function pickHtml(p) {
@@ -202,7 +203,7 @@ function pickHtml(p) {
   const rate = p.perStart == null ? 'no starts yet' : `${fmt(p.perStart)} points per start`;
   const grade = p.quality == null ? 'grade pending' : `${ordinal(Math.round(p.quality * 100))} percentile among drafted ${p.position}s`;
   const label = [`${p.name}, ${p.position}, pick ${p.pickNo}`, p.retained ? '' : `${p.departure} by the drafting team`, plural(p.starts, 'start'), `${fmt(p.points)} points`, rate, grade].filter(Boolean).join(' · ');
-  return `<button type="button" class="draft-pick ${tone}" data-player="${esc(p.playerId)}" title="${esc(label)}" aria-label="${esc(label)}"><b>${esc(pickName(p))}</b><small>${esc(p.position)} · #${p.pickNo}${p.perStart != null ? ` · ${fmt(p.perStart)}/start` : ''}</small>${p.retained ? '' : `<em class="${p.departure === 'Traded' ? 'traded' : 'dropped'}">${esc(p.departure)}</em>`}</button>`;
+  return `<button type="button" class="draft-pick ${tone}" data-player="${esc(p.playerId)}" title="${esc(label)}" aria-label="${esc(label)}"><b><span class="pick-full">${esc(p.name)}</span><span class="pick-short">${esc(pickName(p))}</span></b><small>${esc(p.position)} · #${p.pickNo}${p.perStart != null ? ` · ${fmt(p.perStart)}/start` : ''}</small>${p.retained ? '' : `<em class="${p.departure === 'Traded' ? 'traded' : 'dropped'}">${esc(p.departure)}</em>`}</button>`;
 }
 
 export function renderDraft(ctx) {

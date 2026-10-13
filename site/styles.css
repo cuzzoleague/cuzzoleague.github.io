@@ -230,6 +230,7 @@ th[scope="row"] .grid-label { padding: 9px 10px; max-width: 180px; }
 .draft-pick:hover { border-color: var(--ink-2); }
 .draft-pick b { font-size: 13px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .draft-pick small { font-size: 11px; font-weight: 600; color: var(--ink-2); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-full { display: none; }
 .draft-pick.ungraded { background: var(--surface-2); border-color: var(--line); }
 .draft-pick.gone, .heat-legend i.gone { background: var(--surface-3) repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--muted) 30%, transparent) 7px 9px); border-color: var(--line-strong); }
 .draft-pick.gone b, .draft-pick.gone small { color: var(--muted); }
@@ -245,6 +246,8 @@ th[scope="row"] .grid-label { padding: 9px 10px; max-width: 180px; }
   .draft th[scope="row"] .grid-label { width: 90px; height: 90px; }
   .draft-pick { width: 178px; height: 90px; padding: 8px 10px; }
   .draft-pick b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; font-size: 13.5px; line-height: 1.2; }
+  .pick-full { display: inline; }
+  .pick-short { display: none; }
   .draft-pick small { font-size: 11.2px; }
   .draft-pick em { font-size: 10px; }
   .draft-none { height: 90px; }
