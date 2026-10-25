@@ -212,6 +212,11 @@ select { appearance: none; -webkit-appearance: none; background: var(--surface) 
 .data-table th[scope="row"] { max-width: 180px; overflow: visible; }
 .grid-label { display: block; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 th[scope="row"] .grid-label { padding: 9px 10px; max-width: 180px; }
+/* The first column is locked, header included. Its solid edge fills the spacing between cells, so scrolled
+   cells pass fully behind it instead of peeking through the gaps. */
+.data-table thead th:first-child { position: sticky; left: 0; z-index: 3; background: var(--surface); }
+.data-table th:first-child { box-shadow: 0 0 0 3px var(--surface); }
+.data-table.draft th:first-child, .data-table.draft thead th { box-shadow: 0 0 0 4px var(--surface); }
 .heat td.heat-future { border: 1px dashed var(--line); background: transparent; }
 .heat td.heat-avg { background: var(--surface-2); }
 

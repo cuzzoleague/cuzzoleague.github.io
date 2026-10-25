@@ -212,7 +212,7 @@ export function renderSwaps(ctx) {
       const r = records[s.id][o.id];
       return `<td class="${swapTone(r, actual)}${s.id === o.id ? ' actual' : ''}" title="${esc(teamOf(ctx, s.id).name)} with ${esc(teamOf(ctx, o.id).name)}'s schedule">${recordText(r.w, r.l, r.t)}</td>`;
     }).join('')}</tr>`;
-  }).join('')}</tbody></table><p class="table-note">Green beats the team's real record, red is worse, and gray matches it (a tie counts as half a win). Outlined cells are real records. If you borrow the schedule of a team you actually played, you face that team instead.</p>`;
+  }).join('')}</tbody></table>`;
 }
 
 // ---------------------------------------------------------------- Draft postmortem
@@ -281,7 +281,7 @@ export function renderMedian(ctx) {
     const row = `<tr class="${r.change > 0 ? 'up' : r.change < 0 ? 'down' : ''}">${rowHead(`${r.rank}. ${name}`, name)}<td class="median-total">${recordText(r.totalWins, r.totalLosses, r.ties)}</td><td>${recordText(r.wins, r.losses, r.ties)}</td><td>${recordText(r.medianWins, r.medianLosses)}</td><td title="Real standings #${r.actualRank}, median standings #${r.rank}">${move(r)}</td></tr>`;
     return r.rank === cut && rows.length > cut ? `${row}<tr class="cut-line"><td colspan="5"><span>Playoff line · top ${cut}</span></td></tr>` : row;
   }).join('');
-  holder.innerHTML = `<table class="data-table median"><thead><tr>${colHead('Team')}${colHead('With median', 'Real record plus the weekly median games')}${colHead('Real record')}${colHead('Vs median', 'Median games won and lost')}${colHead('Move', 'Places gained or lost against the real standings')}</tr></thead><tbody>${body}</tbody></table><p class="table-note">Each week every team also plays the league median: a win for scoring above it, a loss otherwise. Both standings rank by record, then points for. Green teams climb compared with the real standings; red teams drop.</p>`;
+  holder.innerHTML = `<table class="data-table median"><thead><tr>${colHead('Team')}${colHead('With median', 'Real record plus the weekly median games')}${colHead('Real record')}${colHead('Vs median', 'Median games won and lost')}${colHead('Move', 'Places gained or lost against the real standings')}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 // ---------------------------------------------------------------- Scoring ranges
