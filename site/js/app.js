@@ -3,7 +3,7 @@ import {LEAGUE_ID} from './config.js';
 import {loadLeagueCore, loadAllMatchups, loadTransactions, loadDraft, loadPlayers, loadWeekly, sleeper, avatarUrl} from './sleeper.js';
 import {draftBoard} from './draft.js';
 import {analyzeSeason, entryPoints} from './analytics.js';
-import {gradeMoves, weeklyPointsLookup} from './moves.js';
+import {gradeMoves, weeklyPointsLookup, countMoves} from './moves.js';
 import {loadHistory, readHistoryCache, writeHistoryCache, buildSeason, champions} from './history.js';
 import {pointsFromStats, optimalLineup, positionsOf} from './scoring.js';
 import {esc, clamp, recordText} from './util.js';
@@ -119,6 +119,7 @@ function renderLeague() {
   League.renderDraft(ctx);
   League.renderMoves(ctx);
   League.renderBump(ctx);
+  League.renderMedian(ctx);
   League.renderHistory(ctx);
 }
 
@@ -158,6 +159,8 @@ async function loadSecondary(current) {
   }).catch(error => console.warn('Player directory unavailable', error));
 
   const transactionsReady = loadTransactions(LEAGUE_ID, current.lastWeek);
+  transactionsReady.then(transactions => { if (ctx === current) { ctx.moveCounts = countMoves(transactions); League.renderAwards(ctx); } })
+    .catch(() => { if (ctx === current) { ctx.moveCountsError = true; League.renderAwards(ctx); } });
   const movesJob = (async () => {
     const [transactions, players] = await Promise.all([transactionsReady, current.playersReady]);
     const statsByWeek = new Map(await Promise.all(current.season.playedWeeks.map(async w => [w, await loadWeekly('stats', current.league.season, w).catch(() => new Map())])));
@@ -202,7 +205,7 @@ async function load({quiet = false} = {}) {
       const previous = ctx, players = previous?.players || null;
       ctx = {state, league, users, rosters, winners, losers, weeks, teams, season, nflWeek, defaultWeek, lastWeek, seasonOver, preseason, sims: SIMS,
         players, playersReady: players ? Promise.resolve(players) : loadPlayers(), moves: null, movesError: '', history: previous?.history || null, historyError: '', bench: null,
-        regularWeeks, draft: previous?.draft || null, draftError: ''};
+        regularWeeks, draft: previous?.draft || null, draftError: '', moveCounts: previous?.moveCounts || null, moveCountsError: false};
       const current = ctx;
       current.playersReady.then(p => { current.players = p; }).catch(() => {});
       if (players) ctx.bench = benchPoints();
@@ -238,6 +241,8 @@ $('#refreshBtn').addEventListener('click', () => { Matchups.resetLiveCaches(); l
 document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx && Date.now() - loadedAt > STALE_MS) load({quiet: true}); });
 
 League.bindRankings(() => ctx);
+League.bindAwards(() => ctx);
+League.bindDraft(() => ctx);
 League.bindMoves(() => ctx);
 League.bindBump();
 League.bindHistory(() => ctx);

@@ -82,7 +82,8 @@
       </section>
 
       <section class="panel" id="awards" data-section="Awards" aria-labelledby="awardsTitle">
-        <div class="panel-head"><div><h2 id="awardsTitle">Weekly hardware</h2><p>Superlatives for the group chat, updated after every completed week.</p></div></div>
+        <div class="panel-head"><div><h2 id="awardsTitle">Weekly hardware</h2><p>Superlatives for the group chat, updated after every completed week.</p></div>
+          <button type="button" class="btn ghost small awards-toggle" id="awardsToggle" aria-expanded="false" aria-controls="awardsGrid" hidden><span>Show top 3</span><svg viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1l5 5 5-5"/></svg></button></div>
         <div class="awards" id="awardsGrid"></div>
       </section>
 
@@ -121,6 +122,11 @@
       <section class="panel" id="movement" data-section="Power movement" aria-labelledby="moveTitle">
         <div class="panel-head"><div><h2 id="moveTitle">Power movement</h2><p>Each team's power rank after every week. Hover or tap a team to follow its line.</p></div></div>
         <div id="bumpChart"></div>
+      </section>
+
+      <section class="panel" id="median" data-section="Median standings" aria-labelledby="medianTitle">
+        <div class="panel-head"><div><h2 id="medianTitle">Median standings</h2><p>The standings if our league used Sleeper's median game: every week, an extra win for beating the league median and an extra loss for missing it.</p></div><span class="head-note">Real record + median games</span></div>
+        <div class="scroll-x" id="medianTable" tabindex="0" role="region" aria-label="Median standings"></div>
       </section>
 
       <section class="panel" id="history" data-section="All-time" aria-labelledby="historyTitle">

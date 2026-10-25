@@ -15,6 +15,18 @@ export function describeMove(tx, rosterId) {
   return {received, sent, picks, faab, bid};
 }
 
+// Completed waiver claims, free-agent moves, and trades per roster this season (preseason included). A
+// transaction counts once for each team in it, so an add/drop is one and a trade counts for both sides.
+export function countMoves(transactions) {
+  const counts = new Map(), seen = new Set();
+  for (const tx of transactions) {
+    if (tx?.status !== 'complete' || !['waiver', 'free_agent', 'trade'].includes(tx.type) || seen.has(tx.transaction_id)) continue;
+    seen.add(tx.transaction_id);
+    for (const id of new Set((tx.roster_ids || []).map(Number))) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  return counts;
+}
+
 // pointsFor(week, playerId) -> fantasy points that player scored that week (0 if they did not play).
 export function gradeMoves({transactions, weeks, completedWeeks, rosterPositions, players, pointsFor}) {
   const done = new Set(completedWeeks);

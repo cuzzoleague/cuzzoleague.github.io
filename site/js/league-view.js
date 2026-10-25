@@ -1,9 +1,10 @@
 // Renders the League tab. Every function takes the shared `ctx` built in app.js.
 import {esc, fmt, signed, plural, recordText, pct, ordinal, mean} from './util.js';
 import {managerTable, champions} from './history.js';
+import {medianStandings} from './analytics.js';
 
 const $ = sel => document.querySelector(sel);
-const ui = {selected: null, moveTeam: null, moveId: null, bumpFocus: null, historySort: 'legacy', historyDir: -1, historyYear: ''};
+const ui = {selected: null, moveTeam: null, moveId: null, bumpFocus: null, historySort: 'legacy', historyDir: -1, historyYear: '', awardsTop3: false, draftTeam: null};
 const SERIES = ['#2f6ad8', '#d45a22', '#1d8a52', '#9b4dca', '#c9a012', '#d6336c', '#0f9aa8', '#7a5c3e', '#5c6bc0', '#e8590c', '#2b8a3e', '#868e96'];
 
 export const initials = name => String(name || '?').replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
@@ -37,6 +38,8 @@ export const METRIC_INFO = {
   awardGauntlet: {title: 'The Gauntlet', body: 'Goes to the team with the toughest schedule so far: the most total points scored against it by its actual opponents. Ties go to whoever is higher in the power rankings.', example: 'Facing a 150-point team week after week. It\'s the schedule, not you. Probably.'},
   awardWildRide: {title: 'Wild Ride', body: 'Goes to the least predictable team: the largest standard deviation of weekly scores. Needs at least two weeks of games.', example: 'Going 160, then 85, then 140. Nobody knows which version of this team shows up.'},
   awardIceCold: {title: 'Ice Cold', body: 'Goes to the team with the most weeks as the league\'s lowest scorer. Ties go to whoever is higher in the power rankings.', example: 'One week at the bottom is bad luck; three is a pattern.'},
+  awardCommitment: {title: 'Commitment Issues', body: 'Goes to the team with the most completed transactions this season, preseason included: waiver claims, free-agent pickups and drops, and trades. Each transaction counts once for every team in it, so an add/drop is one and a trade counts for both sides.', example: 'Grabbing a kicker off waivers, then swapping him for another one the next week, is two transactions.'},
+  awardFutbol: {title: 'Fantasy Futbol', body: 'Goes to the team whose started kickers have scored the most points across completed weeks. Only kickers in the starting K slot count.', example: 'A kicker who scores 15 on your bench adds nothing; a 9-point kicker in your lineup adds 9.'},
   awardBench: {title: 'Bench Blunder', body: 'Goes to the team that has left the most points on its bench. For each completed week, the best legal lineup from the players on the roster (using their real scores) is compared with the lineup actually started, and the gaps are added up.', example: 'Starting a receiver who scored 4 while a 22-point receiver sat on the bench adds 18 points.'},
   bench: {title: 'Bench points', body: 'The gap between your best possible lineup (using actual scores) and the lineup you started, added up across completed weeks.', example: 'Leaving a 25-point receiver on the bench for a 5-point starter adds 20.'}
 };
@@ -120,38 +123,56 @@ export function renderReport(ctx) {
 
 // ---------------------------------------------------------------- Awards
 export function renderAwards(ctx) {
-  const holder = $('#awardsGrid'), rows = byPower(ctx).filter(s => s.weekly.length);
-  if (!rows.length) { holder.innerHTML = '<div class="empty">Awards are handed out after Week 1.</div>'; return; }
-  const top = (score, filter = () => true) => { const pool = rows.filter(filter); return pool.length ? [...pool].sort((a, b) => score(b) - score(a) || a.powerRank - b.powerRank)[0] : null; };
-  const multi = rows.filter(s => s.weekly.length > 1).length ? s => s.weekly.length > 1 : () => true;
+  const holder = $('#awardsGrid'), toggle = $('#awardsToggle'), rows = byPower(ctx).filter(s => s.weekly.length);
+  if (!rows.length) { holder.innerHTML = '<div class="empty">Awards are handed out after Week 1.</div>'; toggle.hidden = true; return; }
+  toggle.hidden = false;
   const byId = id => ctx.season.teams.get(id);
-  const award = (s, detail) => s ? {s, detail: detail(s)} : {pending: 'Not awarded yet'};
+  // Each award ranks the teams that qualify, best first; ties go to whoever is higher in the power rankings.
+  const ranked = (list, detail) => list.filter(x => byId(x.id)).sort((a, b) => b.value - a.value || byId(a.id).powerRank - byId(b.id).powerRank).map(x => ({id: x.id, detail: detail(x)}));
+  const fromStats = (value, detail, qualifies = () => true) => ranked(rows.filter(qualifies).map(s => ({id: s.id, value: value(s), s})), x => detail(x.s));
+  const multi = rows.some(s => s.weekly.length > 1) ? s => s.weekly.length > 1 : () => true;
 
-  // Awards that need data loaded after the first render show a placeholder until it arrives.
-  let wizard = {pending: ctx.movesError ? 'Move grades unavailable' : 'Grading moves…'};
-  if (ctx.moves) {
-    const totals = [...ctx.moves.entries()].map(([id, list]) => {
-      const graded = list.filter(m => m.rows.length);
-      return {id, total: graded.reduce((t, m) => t + m.impact, 0), count: graded.length};
-    }).filter(t => t.count && byId(t.id)).sort((a, b) => b.total - a.total || byId(a.id).powerRank - byId(b.id).powerRank);
-    wizard = totals[0]?.total > 0 ? {s: byId(totals[0].id), detail: `${signed(totals[0].total)} pts from ${plural(totals[0].count, 'graded move')}`} : {pending: 'No move has paid off yet'};
-  }
-  const benchKing = ctx.bench && [...ctx.bench.entries()].sort((a, b) => b[1].total - a[1].total)[0];
-  const bench = !ctx.bench ? {pending: 'Checking lineups…'} : benchKing ? {s: byId(benchKing[0]), detail: `${fmt(benchKing[1].total)} pts left on the bench`} : {pending: 'Not awarded yet'};
+  // Awards that need data loaded after the first render show a placeholder (a string) until it arrives.
+  const wizard = ctx.movesError ? 'Move grades unavailable' : !ctx.moves ? 'Grading moves…' : ranked([...ctx.moves.entries()].map(([id, list]) => {
+    const graded = list.filter(m => m.rows.length);
+    return {id, value: graded.reduce((t, m) => t + m.impact, 0), count: graded.length};
+  }).filter(t => t.count && t.value > 0), t => `${signed(t.value)} pts from ${plural(t.count, 'graded move')}`);
+  const commitment = ctx.moveCountsError ? 'Transactions unavailable' : !ctx.moveCounts ? 'Counting transactions…'
+    : ranked(rows.map(s => ({id: s.id, value: ctx.moveCounts.get(s.id) || 0})).filter(t => t.value > 0), t => plural(t.value, 'completed transaction'));
+  const bench = !ctx.bench ? 'Checking lineups…' : ranked([...ctx.bench.entries()].map(([id, b]) => ({id, value: b.total})).filter(t => t.value > 0), t => `${fmt(t.value)} pts left on the bench`);
 
   const awards = [
-    ['👑', 'Top Dog', 'awardTopDog', award(top(s => s.highs), s => plural(s.highs, 'weekly high score'))],
-    ['🔥', 'Heater', 'awardHeater', award(top(s => s.formZ), s => `${signed(s.formZ, 2)} z recent form`)],
-    ['🧙', 'Waiver Wizard', 'awardWizard', wizard],
-    ['📏', 'Steady Eddie', 'awardSteady', award(top(s => -s.sd, multi), s => `${fmt(s.sd)}-pt weekly swing`)],
-    ['🍀', 'Horseshoe', 'awardHorseshoe', award(top(s => s.luckyWins), s => plural(s.luckyWins, 'below-median win'))],
-    ['💔', 'Heartbreak Hotel', 'awardHeartbreak', award(top(s => s.badBeats), s => plural(s.badBeats, 'above-median loss', 'above-median losses'))],
-    ['🥊', 'The Gauntlet', 'awardGauntlet', award(top(s => s.pa), s => `${fmt(s.pa)} pts against · ${fmt(s.games ? s.pa / s.games : 0)} a game`)],
-    ['🎢', 'Wild Ride', 'awardWildRide', award(top(s => s.sd, multi), s => `${fmt(s.sd)}-pt weekly swing`)],
-    ['🧊', 'Ice Cold', 'awardIceCold', award(top(s => s.lows), s => plural(s.lows, 'weekly low score'))],
-    ['🪑', 'Bench Blunder', 'awardBench', bench]
+    ['👑', 'Top Dog', 'awardTopDog', fromStats(s => s.highs, s => plural(s.highs, 'weekly high score'), s => s.highs > 0), 'No weekly high scores yet'],
+    ['🔥', 'Heater', 'awardHeater', fromStats(s => s.formZ, s => `${signed(s.formZ, 2)} z recent form`)],
+    ['🧙', 'Waiver Wizard', 'awardWizard', wizard, 'No move has paid off yet'],
+    ['🔄', 'Commitment Issues', 'awardCommitment', commitment, 'No completed transactions yet'],
+    ['📏', 'Steady Eddie', 'awardSteady', fromStats(s => -s.sd, s => `${fmt(s.sd)}-pt weekly swing`, multi)],
+    ['🍀', 'Horseshoe', 'awardHorseshoe', fromStats(s => s.luckyWins, s => plural(s.luckyWins, 'below-median win'), s => s.luckyWins > 0), 'No below-median wins yet'],
+    ['💔', 'Heartbreak Hotel', 'awardHeartbreak', fromStats(s => s.badBeats, s => plural(s.badBeats, 'above-median loss', 'above-median losses'), s => s.badBeats > 0), 'No above-median losses yet'],
+    ['🥊', 'The Gauntlet', 'awardGauntlet', fromStats(s => s.pa, s => `${fmt(s.pa)} pts against · ${fmt(s.games ? s.pa / s.games : 0)} a game`)],
+    ['🎢', 'Wild Ride', 'awardWildRide', fromStats(s => s.sd, s => `${fmt(s.sd)}-pt weekly swing`, multi)],
+    ['🦵', 'Fantasy Futbol', 'awardFutbol', fromStats(s => s.kPoints, s => `${fmt(s.kPoints)} pts from ${plural(s.kStarts, 'kicker start')}`, s => s.kStarts > 0), 'No kicker starts yet'],
+    ['🧊', 'Ice Cold', 'awardIceCold', fromStats(s => s.lows, s => plural(s.lows, 'weekly low score'), s => s.lows > 0), 'No weekly low scores yet'],
+    ['🪑', 'Bench Blunder', 'awardBench', bench, 'No points left on the bench yet']
   ];
-  holder.innerHTML = awards.map(([icon, title, key, a]) => `<article class="award ${a.pending ? 'pending' : ''}"><div class="award-icon" aria-hidden="true">${icon}</div><h3>${title} ${info(key, title)}</h3><div class="award-team">${a.pending ? esc(a.pending) : esc(teamOf(ctx, a.s.id).name)}</div><div class="award-detail">${a.pending ? '&nbsp;' : a.detail}</div></article>`).join('');
+  const count = ui.awardsTop3 ? 3 : 1;
+  holder.innerHTML = awards.map(([icon, title, key, list, empty = 'Not awarded yet']) => {
+    const loading = typeof list === 'string', shown = loading ? [] : list.slice(0, count);
+    const body = loading ? `<div class="award-team">${esc(list)}</div><div class="award-detail">&nbsp;</div>`
+      : !shown.length ? `<div class="award-team">Not awarded yet</div><div class="award-detail">${esc(empty)}</div>`
+      : `<ol class="award-list ${count > 1 ? 'ranked' : ''}" aria-label="${esc(title)} ${count > 1 ? 'top three' : 'winner'}">${shown.map((x, i) => `<li${i ? '' : ' class="lead"'}>${count > 1 ? `<span class="award-rank">${i + 1}</span>` : ''}<div class="award-who"><div class="award-team">${esc(teamOf(ctx, x.id).name)}</div><div class="award-detail">${x.detail}</div></div></li>`).join('')}</ol>`;
+    return `<article class="award ${loading || !shown.length ? 'pending' : ''}"><div class="award-icon" aria-hidden="true">${icon}</div><h3>${title} ${info(key, title)}</h3>${body}</article>`;
+  }).join('');
+}
+
+export function bindAwards(getCtx) {
+  const toggle = $('#awardsToggle');
+  toggle.addEventListener('click', () => {
+    ui.awardsTop3 = !ui.awardsTop3;
+    toggle.setAttribute('aria-expanded', String(ui.awardsTop3));
+    toggle.querySelector('span').textContent = ui.awardsTop3 ? 'Winners only' : 'Show top 3';
+    renderAwards(getCtx());
+  });
 }
 
 // ---------------------------------------------------------------- Heatmap + schedule swap
@@ -195,15 +216,29 @@ export function renderSwaps(ctx) {
 }
 
 // ---------------------------------------------------------------- Draft postmortem
-// Phones have room for the full name; the tighter desktop cards use the short form (CSS shows one of the two).
+// Phones show one team at a time with full names; the desktop grid uses the short form (CSS shows one of the two).
 const pickName = p => p.position === 'DEF' ? `${p.playerId} D/ST` : p.name.replace(/^(\S)\S*\s+/, '$1. ');
 
-function pickHtml(p) {
+function pickHtml(p, {detailed = false} = {}) {
   const tone = !p.retained ? 'gone' : p.tier ? `h${p.tier}` : 'ungraded';
   const rate = p.perStart == null ? 'no starts yet' : `${fmt(p.perStart)} points per start`;
   const grade = p.quality == null ? 'grade pending' : `${ordinal(Math.round(p.quality * 100))} percentile among drafted ${p.position}s`;
   const label = [`${p.name}, ${p.position}, pick ${p.pickNo}`, p.retained ? '' : `${p.departure} by the drafting team`, plural(p.starts, 'start'), `${fmt(p.points)} points`, rate, grade].filter(Boolean).join(' · ');
-  return `<button type="button" class="draft-pick ${tone}" data-player="${esc(p.playerId)}" title="${esc(label)}" aria-label="${esc(label)}"><b><span class="pick-full">${esc(p.name)}</span><span class="pick-short">${esc(pickName(p))}</span></b><small>${esc(p.position)} · #${p.pickNo}${p.perStart != null ? ` · ${fmt(p.perStart)}/start` : ''}</small>${p.retained ? '' : `<em class="${p.departure === 'Traded' ? 'traded' : 'dropped'}">${esc(p.departure)}</em>`}</button>`;
+  // The phone view has room to spell out what the grid only shows on hover.
+  const more = detailed ? `<small class="pick-more">${plural(p.starts, 'start')} · ${fmt(p.points)} pts${p.quality == null ? '' : ` · ${ordinal(Math.round(p.quality * 100))} pct ${esc(p.position)}`}</small>` : '';
+  return `<button type="button" class="draft-pick ${tone}" data-player="${esc(p.playerId)}" title="${esc(label)}" aria-label="${esc(label)}"><b><span class="pick-full">${esc(p.name)}</span><span class="pick-short">${esc(pickName(p))}</span></b><small>${esc(p.position)} · #${p.pickNo}${p.perStart != null ? ` · ${fmt(p.perStart)}/start` : ''}</small>${more}${p.retained ? '' : `<em class="${p.departure === 'Traded' ? 'traded' : 'dropped'}">${esc(p.departure)}</em>`}</button>`;
+}
+
+const draftCounts = (board, id) => ({kept: board.picks.filter(p => p.rosterId === id && p.retained).length, made: board.picks.filter(p => p.rosterId === id).length});
+
+// One team's draft, round by round (the phone view).
+function draftTeamRounds(ctx, board, rosterId) {
+  const {kept, made} = draftCounts(board, rosterId);
+  const rounds = board.rounds.map(({round, cells}) => {
+    const picks = cells[rosterId] || [];
+    return `<li><span class="grid-label draft-round">Rd ${round}</span><div class="draft-round-picks">${picks.length ? picks.map(p => pickHtml(p, {detailed: true})).join('') : '<span class="draft-none">No pick this round</span>'}</div></li>`;
+  }).join('');
+  return `<p class="draft-team-sum">${esc(teamOf(ctx, rosterId).name)} still has <b>${kept} of ${made}</b> of its picks.</p><ol class="draft-rounds" aria-label="${esc(teamOf(ctx, rosterId).name)} picks by round">${rounds}</ol>`;
 }
 
 export function renderDraft(ctx) {
@@ -211,16 +246,42 @@ export function renderDraft(ctx) {
   if (!holder) return;
   if (!board) { holder.innerHTML = ctx.draftError ? `<div class="empty">Couldn't load the draft from Sleeper. ${esc(ctx.draftError)}</div>` : '<div class="empty">Loading the draft board…</div>'; return; }
   if (!board.picks.length) { holder.innerHTML = '<div class="empty">No draft picks yet. The board fills in after the draft.</div>'; return; }
-  const kept = id => board.picks.filter(p => p.rosterId === id && p.retained).length, made = id => board.picks.filter(p => p.rosterId === id).length;
   const head = board.columns.map(c => {
-    const t = teamOf(ctx, c.rosterId);
-    return `<th scope="col" title="${esc(t.name)}: ${kept(c.rosterId)} of ${made(c.rosterId)} picks still on the roster"><span class="grid-label draft-team"><small>${c.slot ? `Pick ${c.slot} · ` : ''}${kept(c.rosterId)}/${made(c.rosterId)} kept</small><b>${esc(t.name)}</b></span></th>`;
+    const t = teamOf(ctx, c.rosterId), {kept, made} = draftCounts(board, c.rosterId);
+    return `<th scope="col" title="${esc(t.name)}: ${kept} of ${made} picks still on the roster"><span class="grid-label draft-team"><small>${c.slot ? `Pick ${c.slot} · ` : ''}${kept}/${made} kept</small><b>${esc(t.name)}</b></span></th>`;
   }).join('');
   const body = board.rounds.map(({round, cells}) => `<tr>${rowHead(`Rd ${round}`, `Round ${round}`)}${board.columns.map(c => {
     const picks = cells[c.rosterId] || [];
-    return `<td>${picks.length ? picks.map(pickHtml).join('') : '<span class="draft-none" aria-label="No pick">—</span>'}</td>`;
+    return `<td>${picks.length ? picks.map(p => pickHtml(p)).join('') : '<span class="draft-none" aria-label="No pick">—</span>'}</td>`;
   }).join('')}</tr>`).join('');
-  holder.innerHTML = `<div class="draft-scroll" tabindex="0" role="region" aria-label="Draft board. Scrolls sideways for more teams and down for more rounds."><table class="data-table draft"><thead><tr>${colHead('Round')}${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  // The chosen team survives refreshes; it starts on whoever picked first.
+  const team = board.columns.find(c => c.rosterId === ui.draftTeam) || board.columns[0];
+  const options = board.columns.map(c => `<option value="${c.rosterId}"${c === team ? ' selected' : ''}>${esc(`${c.slot ? `Pick ${c.slot} · ` : ''}${teamOf(ctx, c.rosterId).name}`)}</option>`).join('');
+  holder.innerHTML = `<div class="draft-scroll" tabindex="0" role="region" aria-label="Draft board. Scrolls sideways for more teams and down for more rounds."><table class="data-table draft"><thead><tr>${colHead('Round')}${head}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="draft-team-view"><label class="select-label" for="draftTeamSelect">Team<select id="draftTeamSelect">${options}</select></label><div id="draftTeamRounds" aria-live="polite">${draftTeamRounds(ctx, board, team.rosterId)}</div></div>`;
+}
+
+export function bindDraft(getCtx) {
+  $('#draftBoard').addEventListener('change', event => {
+    if (event.target.id !== 'draftTeamSelect') return;
+    const ctx = getCtx();
+    ui.draftTeam = Number(event.target.value);
+    if (ctx?.draft) $('#draftTeamRounds').innerHTML = draftTeamRounds(ctx, ctx.draft, ui.draftTeam);
+  });
+}
+
+// ---------------------------------------------------------------- Median standings
+export function renderMedian(ctx) {
+  const holder = $('#medianTable'), rows = medianStandings(ctx.season.teams.values());
+  if (!rows.length) { holder.innerHTML = '<div class="empty">No completed weeks yet.</div>'; return; }
+  const cut = Number(ctx.league.settings?.playoff_teams || 6);
+  const move = r => r.change > 0 ? `<span class="good">▲ ${r.change}</span>` : r.change < 0 ? `<span class="bad">▼ ${-r.change}</span>` : '<span class="flat">—</span>';
+  const body = rows.map(r => {
+    const name = teamOf(ctx, r.id).name;
+    const row = `<tr class="${r.change > 0 ? 'up' : r.change < 0 ? 'down' : ''}">${rowHead(`${r.rank}. ${name}`, name)}<td class="median-total">${recordText(r.totalWins, r.totalLosses, r.ties)}</td><td>${recordText(r.wins, r.losses, r.ties)}</td><td>${recordText(r.medianWins, r.medianLosses)}</td><td title="Real standings #${r.actualRank}, median standings #${r.rank}">${move(r)}</td></tr>`;
+    return r.rank === cut && rows.length > cut ? `${row}<tr class="cut-line"><td colspan="5"><span>Playoff line · top ${cut}</span></td></tr>` : row;
+  }).join('');
+  holder.innerHTML = `<table class="data-table median"><thead><tr>${colHead('Team')}${colHead('With median', 'Real record plus the weekly median games')}${colHead('Real record')}${colHead('Vs median', 'Median games won and lost')}${colHead('Move', 'Places gained or lost against the real standings')}</tr></thead><tbody>${body}</tbody></table><p class="table-note">Each week every team also plays the league median: a win for scoring above it, a loss otherwise. Both standings rank by record, then points for. Green teams climb compared with the real standings; red teams drop.</p>`;
 }
 
 // ---------------------------------------------------------------- Scoring ranges

@@ -18,7 +18,7 @@ export function pairsFor(entries) {
 
 function blank() {
   return {weekly: [], wins: 0, losses: 0, ties: 0, pf: 0, pa: 0, expectedWins: 0, allPlay: {w: 0, l: 0, t: 0},
-    badBeats: 0, luckyWins: 0, highs: 0, lows: 0, defPoints: 0, defStarts: 0, closest: null, blowout: null, history: []};
+    badBeats: 0, luckyWins: 0, highs: 0, lows: 0, defPoints: 0, defStarts: 0, kPoints: 0, kStarts: 0, closest: null, blowout: null, history: []};
 }
 
 function powerTable(ids, stats, upto) {
@@ -38,7 +38,9 @@ function powerTable(ids, stats, upto) {
 
 export function analyzeSeason({rosterIds, weeks, completedWeeks, remainingWeeks = [], rosterPositions = [], playoffTeams = 6, seed = 'cuzzo', sims = 4000}) {
   const ids = rosterIds.map(Number), stats = new Map(ids.map(id => [id, blank()]));
-  const defSlots = rosterPositions.map((slot, i) => slot === 'DEF' ? i : -1).filter(i => i >= 0);
+  const slotsFor = position => rosterPositions.map((slot, i) => slot === position ? i : -1).filter(i => i >= 0);
+  // Points from players started in the D/ST and kicker slots: [slot indexes, points field, starts field].
+  const slotTotals = [[slotsFor('DEF'), 'defPoints', 'defStarts'], [slotsFor('K'), 'kPoints', 'kStarts']];
   const played = [];
   for (const week of completedWeeks) {
     const entries = (weeks.get(week) || []).filter(e => stats.has(Number(e.roster_id)));
@@ -52,12 +54,12 @@ export function analyzeSeason({rosterIds, weeks, completedWeeks, remainingWeeks 
       s.weekly.push({week, pts, rank, z: spread ? (pts - avg) / spread : 0, expected, median: med, leagueAvg: avg, opp: null, oppPts: null, result: null});
       s.expectedWins += expected; s.allPlay.w += beat; s.allPlay.t += tied; s.allPlay.l += n - 1 - beat - tied;
       if (rank === 1) s.highs++;
-      if (rank === n) s.lows++;
-      for (const i of defSlots) {
+      if (!scores.some(x => x < pts)) s.lows++; // teams tied for the lowest score all count
+      for (const [slots, pointsKey, startsKey] of slotTotals) for (const i of slots) {
         const pid = entry.starters?.[i];
         if (!pid || pid === '0') continue;
         const value = entry.starters_points?.[i] ?? entry.players_points?.[pid];
-        if (value != null && Number.isFinite(Number(value))) { s.defPoints += Number(value); s.defStarts++; }
+        if (value != null && Number.isFinite(Number(value))) { s[pointsKey] += Number(value); s[startsKey]++; }
       }
     }
     for (const {entries: pair} of pairsFor(entries)) {
@@ -107,6 +109,19 @@ export function analyzeSeason({rosterIds, weeks, completedWeeks, remainingWeeks 
   const odds = simulatePlayoffs({ids, stats, weeks, remainingWeeks, playoffTeams, seed, sims});
   for (const [id, s] of stats) Object.assign(s, odds[id]);
   return {teams: stats, playedWeeks: played, schedule: scheduleSwaps(ids, weeks, played), leagueAvg: mean([...stats.values()].flatMap(s => s.weekly.map(r => r.pts)))};
+}
+
+// Standings as if Sleeper's median game were on: each week every team also wins by scoring above the
+// league median, or loses otherwise. Both tables rank by record (a tie is half a win), then points for.
+export function medianStandings(teamStats) {
+  const rows = [...teamStats].filter(s => s.weekly.length).map(s => {
+    const medianWins = s.weekly.filter(r => r.pts > r.median).length;
+    return {id: s.id, wins: s.wins, losses: s.losses, ties: s.ties, pf: s.pf, medianWins, medianLosses: s.weekly.length - medianWins,
+      totalWins: s.wins + medianWins, totalLosses: s.losses + s.weekly.length - medianWins};
+  });
+  const byRecord = (w, t) => (a, b) => (b[w] + b[t] / 2) - (a[w] + a[t] / 2) || b.pf - a.pf;
+  [...rows].sort(byRecord('wins', 'ties')).forEach((r, i) => { r.actualRank = i + 1; });
+  return rows.sort(byRecord('totalWins', 'ties')).map((r, i) => ({...r, rank: i + 1, change: r.actualRank - (i + 1)}));
 }
 
 // What each team's record would be if it had played another team's schedule.
