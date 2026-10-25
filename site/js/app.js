@@ -243,6 +243,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && ct
 League.bindRankings(() => ctx);
 League.bindAwards(() => ctx);
 League.bindDraft(() => ctx);
+League.bindGrids();
 League.bindMoves(() => ctx);
 League.bindBump();
 League.bindHistory(() => ctx);

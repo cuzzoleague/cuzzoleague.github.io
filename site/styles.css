@@ -217,6 +217,15 @@ th[scope="row"] .grid-label { padding: 9px 10px; max-width: 180px; }
 .data-table thead th:first-child { position: sticky; left: 0; z-index: 3; background: var(--surface); }
 .data-table th:first-child { box-shadow: 0 0 0 3px var(--surface); }
 .data-table.draft th:first-child, .data-table.draft thead th { box-shadow: 0 0 0 4px var(--surface); }
+/* Scrolling stops with a whole column against the locked one (and a whole draft round under the header row).
+   The scroll padding that lines this up is measured in league-view.js. */
+#heatmapTable, #swapTable, #medianTable { scroll-snap-type: x mandatory; }
+.draft-scroll { scroll-snap-type: both mandatory; }
+.data-table thead th:not(:first-child) { scroll-snap-align: none start; }
+/* The draft board's headers and round labels are all locked, and locked (sticky) cells don't act as snap
+   points. It snaps on every pick cell instead, so there's always one on screen to snap to in both directions. */
+.data-table.draft thead th { scroll-snap-align: none; }
+.data-table.draft tbody td { scroll-snap-align: start; }
 .heat td.heat-future { border: 1px dashed var(--line); background: transparent; }
 .heat td.heat-avg { background: var(--surface-2); }
 

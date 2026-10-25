@@ -180,6 +180,25 @@ export function bindAwards(getCtx) {
 const colHead = (text, title = text) => `<th scope="col" title="${esc(title)}"><span class="grid-label">${esc(text)}</span></th>`;
 const rowHead = (text, title = text) => `<th scope="row" title="${esc(title)}"><span class="grid-label">${esc(text)}</span></th>`;
 
+// Scrolling grids snap so a whole column lands right beside the locked first column (and, on the draft board,
+// a whole round right under the locked header row). The snap padding has to match the locked parts' real size,
+// so it is measured after every render and on resize.
+function snapToLocked(container) {
+  const table = container?.querySelector('table');
+  if (!table) return;
+  const gap = parseFloat(getComputedStyle(table).borderSpacing) || 0, corner = table.querySelector('thead th:first-child');
+  container.style.scrollPaddingLeft = corner?.offsetWidth ? `${corner.offsetWidth + gap}px` : '';
+  if (table.classList.contains('draft')) container.style.scrollPaddingTop = table.tHead?.offsetHeight ? `${table.tHead.offsetHeight + gap}px` : '';
+}
+
+export function bindGrids() {
+  let timer = null;
+  addEventListener('resize', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ['#heatmapTable', '#swapTable', '#medianTable', '#draftBoard .draft-scroll'].forEach(sel => snapToLocked($(sel))), 150);
+  });
+}
+
 export function renderHeatmap(ctx) {
   const holder = $('#heatmapTable'), rows = byPower(ctx), played = ctx.season.playedWeeks, n = ctx.season.teams.size;
   if (!played.length) { holder.innerHTML = '<div class="empty">No completed weeks yet.</div>'; return; }
@@ -194,6 +213,7 @@ export function renderHeatmap(ctx) {
       return `<td class="h${bucket(r.rank)}" title="Week ${w}: ${fmt(r.pts)} (#${r.rank})${r.result ? `, ${r.result} vs ${esc(teamOf(ctx, r.opp).name)}` : ''}">${fmt(r.pts)}<small>#${r.rank}${r.result ? ` · ${r.result}` : ''}</small></td>`;
     }).join('')}<td class="heat-avg"><b>${fmt(s.avg)}</b></td></tr>`;
   }).join('')}</tbody></table>`;
+  snapToLocked(holder);
 }
 
 // A borrowed schedule's record against the team's real one; a tie counts as half a win.
@@ -213,6 +233,7 @@ export function renderSwaps(ctx) {
       return `<td class="${swapTone(r, actual)}${s.id === o.id ? ' actual' : ''}" title="${esc(teamOf(ctx, s.id).name)} with ${esc(teamOf(ctx, o.id).name)}'s schedule">${recordText(r.w, r.l, r.t)}</td>`;
     }).join('')}</tr>`;
   }).join('')}</tbody></table>`;
+  snapToLocked(holder);
 }
 
 // ---------------------------------------------------------------- Draft postmortem
@@ -259,6 +280,7 @@ export function renderDraft(ctx) {
   const options = board.columns.map(c => `<option value="${c.rosterId}"${c === team ? ' selected' : ''}>${esc(`${c.slot ? `Pick ${c.slot} · ` : ''}${teamOf(ctx, c.rosterId).name}`)}</option>`).join('');
   holder.innerHTML = `<div class="draft-scroll" tabindex="0" role="region" aria-label="Draft board. Scrolls sideways for more teams and down for more rounds."><table class="data-table draft"><thead><tr>${colHead('Round')}${head}</tr></thead><tbody>${body}</tbody></table></div>
     <div class="draft-team-view"><label class="select-label" for="draftTeamSelect">Team<select id="draftTeamSelect">${options}</select></label><div id="draftTeamRounds" aria-live="polite">${draftTeamRounds(ctx, board, team.rosterId)}</div></div>`;
+  snapToLocked(holder.querySelector('.draft-scroll'));
 }
 
 export function bindDraft(getCtx) {
@@ -282,6 +304,7 @@ export function renderMedian(ctx) {
     return r.rank === cut && rows.length > cut ? `${row}<tr class="cut-line"><td colspan="5"><span>Playoff line · top ${cut}</span></td></tr>` : row;
   }).join('');
   holder.innerHTML = `<table class="data-table median"><thead><tr>${colHead('Team')}${colHead('With median', 'Real record plus the weekly median games')}${colHead('Real record')}${colHead('Vs median', 'Median games won and lost')}${colHead('Move', 'Places gained or lost against the real standings')}</tr></thead><tbody>${body}</tbody></table>`;
+  snapToLocked(holder);
 }
 
 // ---------------------------------------------------------------- Scoring ranges
